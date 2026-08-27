@@ -1,0 +1,38 @@
+{
+  "checkpoint": "./runs/bitenet/seed_42/seed_42/pep_mamba_biomamba_latest_mamba3_env/best_checkpoint.pth",
+  "checkpoint_sha256": "5021fde1c48f27ceb31feaef2777f345a7ba300b4ecdc39e9722d80c4ffcacbf",
+  "threshold": 0.61,
+  "training_performed": false,
+  "test_threshold_scan_performed": false,
+  "device": "cuda",
+  "runtime": {
+    "mamba_ssm_file": "<external-mamba-checkout>/mamba_ssm/__init__.py",
+    "mamba_ssm_version": "2.3.2.post1",
+    "mamba_root": "<external-mamba-checkout>",
+    "latest_mamba3_class_file": "<external-mamba-checkout>/mamba_ssm/modules/mamba3.py",
+    "biomamba_class_file": "./mamba3_bio.py"
+  },
+  "protein_sequence": "GAMGKVTHSIHIEKSDTAADTYGFSLSSVEEDGIRRLYVNSVKETGLASKKGLKAGDEILEINNRAADALNSSMLKDFLSQPSLGLLVRTYPEL",
+  "peptide_sequence": "TKQEEFYA",
+  "embedding_shapes": {
+    "protein": [
+      94,
+      1280
+    ],
+    "peptide": [
+      8,
+      1280
+    ]
+  },
+  "outputs": [
+    "4GVC_A_B_3D_residue_lists.json",
+    "4GVC_A_B_attention_raw.npz",
+    "4GVC_A_B_case_metrics.json",
+    "4GVC_A_B_classifier_attention_summary.csv",
+    "4GVC_A_B_cross_attention_long.csv",
+    "4GVC_A_B_old_vs_locked0610_comparison.json",
+    "4GVC_A_B_peptide_occlusion.csv",
+    "4GVC_A_B_protein_occlusion.csv",
+    "4GVC_A_B_residue_predictions.csv"
+  ]
+}

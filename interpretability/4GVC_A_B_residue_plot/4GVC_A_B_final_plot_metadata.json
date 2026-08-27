@@ -1,0 +1,17 @@
+{
+  "pdb": "4GVC",
+  "case_id": "4GVC_A_B",
+  "protein_chain": "A",
+  "peptide_chain": "B",
+  "protein": "Tiam1 PDZ domain",
+  "peptide": "TKQEEFYA",
+  "threshold": 0.61,
+  "f1": 0.8888888888888888,
+  "mcc": 0.8710998510398319,
+  "auroc": 0.9714285714285714,
+  "auprc": 0.9227763815742909,
+  "checkpoint": "./runs/bitenet/seed_42/seed_42/pep_mamba_biomamba_latest_mamba3_env/best_checkpoint.pth",
+  "checkpoint_sha256": "5021fde1c48f27ceb31feaef2777f345a7ba300b4ecdc39e9722d80c4ffcacbf",
+  "source_csv": "./interpretability/4GVC_A_B_TS125_locked_0610/4GVC_A_B_residue_predictions.csv",
+  "source_metrics_json": "./interpretability/4GVC_A_B_TS125_locked_0610/4GVC_A_B_case_metrics.json"
+}

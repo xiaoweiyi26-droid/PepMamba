@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Editors and notebooks
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# Secrets and local settings
+.env
+.env.*
+!.env.example
+
+# Generated embeddings and model artifacts
+*.pkl
+*.pth
+*.pt
+*.ckpt
+*.npy
+*.npz
+!params/*.npy
+!interpretability/**/*.npz
+embeddings/
+checkpoints/
+runs/
+tuning_results/
+smoke_results/
+
+# Logs, archives, and platform files
+*.log
+*.zip
+*.tar
+*.tar.gz
+*.whl
+.DS_Store
+
+# Temporary/backup files
+*.orig
+*.bak
+*~

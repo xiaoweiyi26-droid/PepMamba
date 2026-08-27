@@ -1,0 +1,3 @@
+import numpy as np
+arr = np.load("/root/autodl-tmp/PepMamba-main/model/params/binding_weights.npy")
+print(arr)

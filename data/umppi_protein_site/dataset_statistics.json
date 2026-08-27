@@ -1,0 +1,55 @@
+{
+  "train": {
+    "records": 4726,
+    "unique_proteins": 2242,
+    "unique_peptides": 3885,
+    "duplicated_protein_record_occurrences": 2484,
+    "duplicated_peptide_record_occurrences": 841,
+    "unique_protein_peptide_pairs": 4726,
+    "duplicate_identical_pair_occurrences": 0,
+    "residue_positive_count": 92707,
+    "residue_total_count": 2580067,
+    "residue_positive_ratio": 0.03593201261827697,
+    "average_protein_length": 545.9303851036817,
+    "average_peptide_length": 18.335378755818873
+  },
+  "validation": {
+    "records": 539,
+    "unique_proteins": 440,
+    "unique_peptides": 526,
+    "duplicated_protein_record_occurrences": 99,
+    "duplicated_peptide_record_occurrences": 13,
+    "unique_protein_peptide_pairs": 539,
+    "duplicate_identical_pair_occurrences": 0,
+    "residue_positive_count": 10616,
+    "residue_total_count": 283865,
+    "residue_positive_ratio": 0.03739805893646628,
+    "average_protein_length": 526.6512059369202,
+    "average_peptide_length": 18.035250463821892
+  },
+  "test": {
+    "records": 1310,
+    "unique_proteins": 586,
+    "unique_peptides": 1179,
+    "duplicated_protein_record_occurrences": 724,
+    "duplicated_peptide_record_occurrences": 131,
+    "unique_protein_peptide_pairs": 1310,
+    "duplicate_identical_pair_occurrences": 0,
+    "residue_positive_count": 25664,
+    "residue_total_count": 656007,
+    "residue_positive_ratio": 0.03912153376412142,
+    "average_protein_length": 500.76870229007636,
+    "average_peptide_length": 18.479389312977098
+  },
+  "cross_split": {
+    "record_overlap_train_validation": 0,
+    "record_overlap_train_test": 0,
+    "record_overlap_validation_test": 0,
+    "protein_sequence_overlap_train_validation": 286,
+    "protein_sequence_overlap_train_test": 0,
+    "protein_sequence_overlap_validation_test": 0,
+    "pair_overlap_train_validation": 0,
+    "pair_overlap_train_test": 0,
+    "pair_overlap_validation_test": 0
+  }
+}
