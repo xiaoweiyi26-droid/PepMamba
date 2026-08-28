@@ -32,9 +32,9 @@ def main():
  for i in range(1,6):
   c=trial_cfg[i]; c.update({'d_k':32,'d_v':32,'d_inner_multiplier':2,'effective_batch_size':16 if c['batch_size']==16 else 24,'scheduler':{'name':'CosineAnnealingWarmRestarts','T_0':10,'eta_min':1e-7},'grad_clip':1.0,'parameter_source':'locked deterministic six-level crossed coverage'})
   configs.append(c)
- payload={'locked_at':datetime.now(timezone.utc).isoformat(),'protocol':'deterministic six-level crossed coverage; trial_000 actual values anchor nearest levels; trial_001-005 receive each remaining level exactly once per continuous parameter','seed':42,'epochs':35,'tonight_trials':['trial_001','trial_002','trial_003','trial_004'],'held_trial':'trial_005','test_access_allowed':False,'configs':configs}
+ payload={'locked_at':datetime.now(timezone.utc).isoformat(),'protocol':'deterministic six-level crossed coverage; trial_000 actual values anchor nearest levels; trial_001-005 receive each remaining level exactly once per continuous parameter','seed':42,'epochs':35,'scheduled_trials':['trial_001','trial_002','trial_003','trial_004'],'held_trial':'trial_005','test_access_allowed':False,'configs':configs}
  canonical=json.dumps(payload,sort_keys=True,separators=(',',':')).encode(); payload['config_payload_sha256']=hashlib.sha256(canonical).hexdigest()
  (out/'trial_000_005_locked_configs.json').write_text(json.dumps(payload,indent=2)+'\n'); pd.DataFrame(configs).to_csv(out/'trial_000_005_locked_parameter_table.csv',index=False); pd.DataFrame(level_rows).to_csv(out/'continuous_level_assignment.csv',index=False)
- readme=f"# UMPPI deterministic grid lock\n\n- Locked: {payload['locked_at']}\n- Payload SHA-256: `{payload['config_payload_sha256']}`\n- Tonight: trial_001–trial_004 only\n- Held: trial_005\n- Test access: false\n"; (out/'GRID_LOCK.md').write_text(readme)
+ readme=f"# UMPPI deterministic grid lock\n\n- Locked: {payload['locked_at']}\n- Payload SHA-256: `{payload['config_payload_sha256']}`\n- Scheduled batch: trial_001–trial_004\n- Held: trial_005\n- Test access: false\n"; (out/'GRID_LOCK.md').write_text(readme)
  print(json.dumps(payload,indent=2))
 if __name__=='__main__':main()

@@ -339,7 +339,7 @@ def main() -> None:
         "Existing BITENET training runner",
     )
 
-    # Activate latest mamba_ssm and inject BioMamba BEFORE importing PepMamba code.
+    # Activate the required mamba_ssm runtime before importing PepMamba modules.
     env_info = activate_latest_mamba3_with_biomamba(
         latest_root=latest_root,
         biomamba_file=biomamba_file,
@@ -349,7 +349,7 @@ def main() -> None:
         sys.path.insert(0, str(project_root))
     os.chdir(project_root)
 
-    # These imports must happen only after BioMamba injection.
+    # Import model modules after BioMamba registration.
     base = importlib.import_module("bitenet_training_core")
     project_modules = importlib.import_module("modules")
 

@@ -522,13 +522,6 @@ Recommended trial: `{winner['trial_id']}`. It ranked first among {len(ranked)} t
 - {tradeoff}
 - `paper_friendly_summary.csv` is presentation-only and was not used to choose the trial.
 
-## 中文主文建议表述
-
-我们仅使用独立验证集进行超参数、检查点和分类阈值选择。按照验证集 MCC 优先、AUPRC 和 AUROC 依次作为并列裁决的预设规则，最终选择 `{winner['trial_id']}`。在验证集阈值 {val['threshold']:.3f} 固定后，该单模型在 TS639 上获得 AUROC {test['auc']:.3f}、MCC {test['mcc']:.3f}、Precision {test['precision']:.3f}、Sensitivity {test['sensitivity']:.3f} 和 Specificity {test['specificity']:.3f}。测试集仅用于一次最终评估，未参与模型或阈值选择。{('该结果显示了较稳健的排序与正残基富集能力。' if presentation['improved_ranking_ability'] and presentation['improved_positive_residue_enrichment'] else '未超过的指标应按验证集选择结果如实报告，不作全面优于现有方法的表述。')}
-
-## Suggested English main-text wording
-
-Hyperparameters, checkpoint, and decision threshold were selected exclusively on the independent validation set. Using the prespecified ranking rule of validation MCC, followed by AUPRC and AUROC as tie-breakers, trial `{winner['trial_id']}` was selected. With the validation-derived threshold fixed at {val['threshold']:.3f}, the single model achieved an AUROC of {test['auc']:.3f}, MCC of {test['mcc']:.3f}, precision of {test['precision']:.3f}, sensitivity of {test['sensitivity']:.3f}, and specificity of {test['specificity']:.3f} on TS639. The test set was used only once for final evaluation and was not used for model or threshold selection. {tradeoff}
 """
     (output_dir / "best_candidate_for_manuscript.md").write_text(markdown, encoding="utf-8")
     comparison_rows = []
@@ -576,7 +569,7 @@ def consistency_report(results, winner, output_dir, args):
               f"- Duplicate checkpoint hashes: `{json.dumps(duplicates)}`",
               f"- Test-evaluated trials: `{actual_tests}`",
               f"- Test leakage check: `{'PASS' if leakage_ok else 'FAIL'}`",
-              "- Test CSV schema/label integrity was audited before training because the user explicitly requested it; no test metric, prediction, or threshold was computed before the validation winner lock.",
+              "- Test CSV schema/label integrity was audited before training; no test metric, prediction, or threshold was computed before the validation winner lock.",
               "- Validation ranking is MCC descending, then AUPRC descending, then AUROC descending.",
               "- AUROC and AUPRC are computed directly from probabilities and are threshold-independent.", ""]
     if duplicates:

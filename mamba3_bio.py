@@ -1,6 +1,6 @@
 # Copyright (c) 2024-2026, Tri Dao, Albert Gu.
 # Bio-adapted Mamba3: simplified for training, following BioMamba2Block design philosophy.
-# FIXED: Forced explicit path for B/C norm and bias to prevent Triton kernel fusion bypass and state pollution.
+# The explicit B/C normalization and bias path avoids fused-kernel state inconsistencies.
 
 import math
 import os
@@ -65,10 +65,10 @@ class BioMamba3Block(nn.Module):
         conv_bias=True,
         dropout=0.0,
         chunk_size=64,
-        use_mem_eff_path=True, # Kept for signature compatibility, but forcefully ignored
+        use_mem_eff_path=True, # Retained for API compatibility; execution uses the explicit path.
         # Output projection
         norm_before_gate=False,
-        # Absorb kwarg
+        # Retained for API compatibility.
         layer_idx=None,
         device=None,
         dtype=None,
@@ -184,7 +184,7 @@ class BioMamba3Block(nn.Module):
             else None
         )
 
-        # ALWAYS use the non-fused path to preserve Mamba3 architectural integrity (B/C norms & biases)
+        # Use the non-fused path to preserve B/C normalization and bias semantics.
         z, xBC, dd_dt = torch.split(
             zxbcdt,
             [self.d_inner, self.d_inner + 2 * self.ngroups * self.d_state, self.nheads],

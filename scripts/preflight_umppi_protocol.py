@@ -174,7 +174,7 @@ def main():
     ]]
     validity_out.to_csv(project / "umppi_residue_validity.csv", index=False)
 
-    # One row per unique long protein, without exposing giant sequences in the report.
+    # Record one row per unique long protein without embedding full sequences in the report.
     seq_groups = validity.groupby("prot_seq", sort=False)
     long_rows = []
     alignment_rows = []
@@ -255,7 +255,7 @@ def main():
 
 ## Decision
 
-**Do not start PepMamba training yet.** The split can now be constructed without overlap, but the current ESM pipeline is not safe for UMPPI: it deletes noncanonical residues, has no >1022-residue chunking, and the dataloader silently clips feature/label lengths.
+**Training readiness: blocked.** The split can be constructed without overlap, but the audited ESM pipeline deletes noncanonical residues, lacks chunking for sequences longer than 1,022 residues, and clips feature/label lengths.
 
 ## Data and official-source evidence
 
@@ -278,9 +278,9 @@ def main():
 | group 2 | 3,526 | 1,763 | 1,763 | official independent test |
 | group 0 minus group 1 | 13,007 | 6,492 | 6,515 | legal effective PepMamba training subset |
 
-Group 1 is contained in group 0 in every supplied balanced file/fold. The official loader uses both lists directly, which would overlap training and validation. For our validation-based PepMamba protocol, use `group0 - group1` for training, group1 for validation, and group2 for the untouched test set.
+Group 1 is contained in group 0 in every supplied balanced file/fold. The official loader uses both lists directly, which would overlap training and validation. For the validation-based PepMamba protocol, use `group0 - group1` for training, group1 for validation, and group2 for the held-out test set.
 
-The repository uses the literal setting `0.0001`, while the paper setting supplied for this audit is `NA`. No README/code statement equating them was found. Therefore **0.0001 = NA remains unresolved**, even though the 0.0001/new_protein/fold0 counts exactly match Table 1. Do not use 0.6 for formal reproduction.
+The repository uses the literal setting `0.0001`, while the paper setting supplied for this audit is `NA`. No README or code statement equating them was found. Therefore **0.0001 = NA remains unresolved**, even though the 0.0001/new_protein/fold0 counts exactly match Table 1; the `0.6` setting is not supported for formal reproduction.
 
 ## Protein-residue task eligibility
 

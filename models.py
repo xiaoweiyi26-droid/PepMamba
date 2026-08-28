@@ -105,7 +105,7 @@ class ResiduePredictionHead(nn.Module):
         self.norm_ms = nn.LayerNorm(d_model)
 
         # Lightweight Transformer classifier head.
-        # cls_attn will be returned for later attention visualization.
+        # Preserve classifier attention for downstream visualization.
         self.cls_attn = nn.MultiheadAttention(
             embed_dim=d_model,
             num_heads=4,
@@ -184,8 +184,8 @@ class PepMamba(nn.Module):
             protein_pad_mask=class_mask,
         )
 
-        # Do not write into attention_maps[-1], because older modules may return a Tensor instead of a dict.
-        # Append classifier attention as an independent item for later visualization.
+        # Store classifier attention separately because legacy modules may return a tensor.
+
         attention_maps.append({"cls_transformer_attn": cls_attn})
 
         return logits, attention_maps

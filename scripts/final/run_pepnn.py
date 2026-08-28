@@ -541,13 +541,6 @@ Validation composite: `{val['composite']:.6f}` = 0.45 × MCC + 0.35 × AUPRC + 0
 - MCC {relation(test['mcc'], pepnn['mcc'])} PepNN-Seq (0.272) and {relation(test['mcc'], original['mcc'])} PepCA original (0.351).
 - Operating-point trade-off: {presentation['tradeoff']}.
 
-## 中文 SCI Results 写法
-
-我们仅使用独立验证集选择超参数、checkpoint 和分类阈值。按照预设的验证集 MCC 优先、AUPRC、AUROC及复合分数依次作为并列裁决的规则，最终选择 `{winner['trial_id']}`。固定验证集导出的阈值 {val['threshold']:.3f} 后，该单模型在TS092上获得AUROC {test['auc']:.3f}、AUPRC {test['auprc']:.3f}、MCC {test['mcc']:.3f}、Sensitivity {test['sensitivity']:.3f}、Specificity {test['specificity']:.3f}和Precision {test['precision']:.3f}。测试集仅用于模型锁定后的一次评估，未参与模型或阈值选择。对于未超过的指标以及Sensitivity或Precision的下降，应作为固定阈值下的性能权衡如实报告。
-
-## English table caption
-
-**Table X. Performance of validation-selected PepMamba on the independent TS092 test set.** Hyperparameters and the checkpoint were selected using validation MCC, with AUPRC, AUROC, and a prespecified composite score as tie-breakers. The decision threshold was selected by validation MCC and fixed before a single test evaluation; no test-set threshold optimization or test-based trial selection was performed.
 """
     (output_dir / "best_candidate_for_manuscript.md").write_text(markdown, encoding="utf-8")
     comparison_rows = [{"model": name, **values} for name, values in COMPARATORS.items()]
@@ -615,7 +608,7 @@ def consistency_report(results, winner, output_dir, args):
               f"- Test-evaluated trials: `{actual_tests}`"]
     lines += [f"- [{'x' if ok else ' '}] {name}" for name, ok in test_checks.items()]
     lines += ["",
-              "- Test CSV schema/label integrity was audited before training because the user explicitly requested it; no test metric, prediction, or threshold was computed before the validation winner lock.",
+              "- Test CSV schema/label integrity was audited before training; no test metric, prediction, or threshold was computed before the validation winner lock.",
               "- Primary validation ranking is MCC descending, then AUPRC, AUROC, and composite descending.",
               "- A separate composite-first ranking is generated for audit only.",
               "- AUROC and AUPRC are computed directly from probabilities and are threshold-independent.", ""]

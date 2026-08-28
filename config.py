@@ -111,5 +111,5 @@ MODEL_CONFIG = {
     "d_inner": 256,
 }
 
-# Separate experiment folder so you can keep your old results.
+# Namespace for deterministic BITENET experiment outputs.
 EXP_NAME = "biomamba_bitenet_seed42"

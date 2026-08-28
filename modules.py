@@ -32,7 +32,7 @@ def reverse_sequence(x, mask=None):
     idx = torch.arange(seqlen, device=x.device).unsqueeze(0).expand(x.size(0), -1)
     rev_idx = lengths.unsqueeze(1) - 1 - idx
 
-    # If rev_idx < 0, it means it's a padding token, we just keep its original index
+    # Preserve the original index for padding positions.
     rev_idx = torch.where(rev_idx < 0, idx, rev_idx)
 
     # Gather the reversed sequence
@@ -121,7 +121,7 @@ class BidirectionalMambaBlock(nn.Module):
     def forward(self, x, mask=None):
         y_fwd = self.fwd_mamba(x)
 
-        # Safely reverse sequence, keeping padding at the tail
+        # Reverse valid positions while retaining padding at the tail.
         x_rev = reverse_sequence(x, mask)
         y_bwd_rev = self.bwd_mamba(x_rev)
         y_bwd = reverse_sequence(y_bwd_rev, mask)
@@ -172,7 +172,7 @@ class TwoWayMambaBlock(nn.Module):
         scores = torch.einsum("b h i d, b h j d -> b h i j", q, k) / math.sqrt(self.d_k)
 
         if key_mask is not None:
-            # -1e9 instead of -1e4 to avoid leakage in fp32
+            # A large negative mask value prevents padded positions from receiving fp32 attention mass.
             scores = scores.masked_fill(key_mask[:, None, None, :], -1e9)
 
         attn = F.softmax(scores, dim=-1)
@@ -200,7 +200,7 @@ class TwoWayMambaBlock(nn.Module):
         protein_local = self.protein_local(protein_feat)
         peptide_local = self.peptide_local(peptide_feat)
 
-        # Pass masks to BidirectionalMambaBlock to ensure safe reversal
+        # Propagate padding masks to the bidirectional sequence reversal.
         protein_context = self.protein_mamba(protein_local, mask=protein_mask) + protein_local
         peptide_context = self.peptide_mamba(peptide_local, mask=peptide_mask) + peptide_local
 

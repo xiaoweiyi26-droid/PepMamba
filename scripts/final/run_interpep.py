@@ -533,8 +533,6 @@ def comparison_text(value, comparator, metric):
 def write_manuscript_outputs(winner, ranked_auc, ranked_composite, presentation, output_dir):
     val = winner["validation"]; test = winner["test"]
     original = COMPARATORS["PepCA original"]
-    reached = "达到" if test["auc"] > .800 else "未达到"
-    direction = lambda value, baseline: "提高" if value > baseline else ("持平" if value == baseline else "下降")
     markdown = f"""# Best InterPep candidate for manuscript
 
 ## Validation-based recommendation
@@ -549,15 +547,8 @@ Validation composite: `{val['composite']:.6f}` = 0.50 × AUROC + 0.30 × AUPRC +
 |---:|---:|---:|---:|---:|---:|---:|
 | {test['sensitivity']:.4f} | {test['specificity']:.4f} | {test['precision']:.4f} | {test['f1']:.4f} | {test['mcc']:.4f} | {test['auc']:.4f} | {test['auprc']:.4f} |
 
-Test AUROC {reached} 0.800，并相对 PepCA original 0.796 {direction(test['auc'], original['auc'])}。Operating-point trade-off: {presentation['tradeoff']}.
+PepCA original AUROC: {original['auc']:.3f}. Operating-point trade-off: {presentation['tradeoff']}.
 
-## 中文 SCI Results 写法
-
-我们仅使用独立验证集选择超参数、checkpoint 和分类阈值。按照预设的验证集 AUROC 优先、AUPRC、MCC 及复合分数依次作为并列裁决的规则，最终选择 `{winner['trial_id']}`。固定验证集导出的阈值 {val['threshold']:.3f} 后，该单模型在 TS251 上获得 AUROC {test['auc']:.3f}、AUPRC {test['auprc']:.3f}、MCC {test['mcc']:.3f}、Sensitivity {test['sensitivity']:.3f}、Specificity {test['specificity']:.3f} 和 Precision {test['precision']:.3f}。测试集仅用于锁定模型后的一次评估，未参与模型或阈值选择。对于低于原始 PepCA 的指标，应作为排序能力与固定阈值分类性能之间的权衡如实报告。
-
-## English table caption
-
-**Table X. Performance of validation-selected PepMamba on the independent TS251 test set.** Hyperparameters and the checkpoint were selected using validation AUROC, with AUPRC, MCC, and a prespecified composite score as tie-breakers. The decision threshold was selected by validation MCC and fixed before a single test evaluation; no test-set threshold optimization or test-based trial selection was performed.
 """
     (output_dir / "best_candidate_for_manuscript.md").write_text(markdown, encoding="utf-8")
     comparison_rows = [{"model": "PepCA original", **original},
@@ -625,7 +616,7 @@ def consistency_report(results, winner, output_dir, args):
               f"- Test-evaluated trials: `{actual_tests}`"]
     lines += [f"- [{'x' if ok else ' '}] {name}" for name, ok in test_checks.items()]
     lines += ["",
-              "- Test CSV schema/label integrity was audited before training because the user explicitly requested it; no test metric, prediction, or threshold was computed before the validation winner lock.",
+              "- Test CSV schema/label integrity was audited before training; no test metric, prediction, or threshold was computed before the validation winner lock.",
               "- Primary validation ranking is AUROC descending, then AUPRC, MCC, and composite descending.",
               "- A separate composite-first ranking is generated for audit only.",
               "- AUROC and AUPRC are computed directly from probabilities and are threshold-independent.", ""]
