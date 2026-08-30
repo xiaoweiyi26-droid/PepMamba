@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train PepMamba and select the checkpoint/threshold using validation only."""
+"""Train PepMamba with the fixed paper configuration for each dataset."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
+# Effective hash seeding requires exporting PYTHONHASHSEED before Python starts.
 os.environ.setdefault("PYTHONHASHSEED", "42")
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 os.environ.setdefault("NVIDIA_TF32_OVERRIDE", "0")
@@ -134,6 +135,7 @@ def activate_runtime():
 def fixed_config(dataset: str) -> dict:
     params = BEST_PARAMS[dataset]
     return {
+        # Legacy runner key retained for the fixed paper run directory name.
         "trial_id": "seed_42",
         "lr": params["lr"],
         "dropout": params["dropout"],
@@ -145,6 +147,9 @@ def fixed_config(dataset: str) -> dict:
         "class_weight_power": params["class_weight_power"],
         "max_pos_weight": params["max_pos_weight"],
         "n_layers": params["n_layers"],
+        # Legacy key name; this is the fixed paper checkpoint epoch.
+        "best_epoch": params["best_epoch"],
+        "threshold": params["threshold"],
     }
 
 
@@ -162,7 +167,7 @@ def validate_inputs(dataset: str) -> None:
             raise FileNotFoundError(path)
 
 
-def train_regular(dataset: str, seed: int, epochs: int, output_dir: Path, unified_selection: bool = False) -> None:
+def train_regular(dataset: str, seed: int, epochs: int, output_dir: Path) -> None:
     runtime = activate_runtime()
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
@@ -177,14 +182,8 @@ def train_regular(dataset: str, seed: int, epochs: int, output_dir: Path, unifie
         dataset=dataset,
         seed=seed,
         epochs=epochs,
-        threshold_min=0.20,
-        threshold_max=0.75,
-        threshold_step=0.005,
-        fixed_validation_threshold=(
-            float(BEST_PARAMS[dataset]["threshold"])
-            if dataset == "interpep" and not unified_selection else None
-        ),
-        unified_selection=unified_selection,
+        fixed_validation_threshold=float(BEST_PARAMS[dataset]["threshold"]),
+        fixed_checkpoint_epoch=int(BEST_PARAMS[dataset]["best_epoch"]),
     )
     environment = runner.environment_info(runtime)
     runner.write_json(output_dir / "environment_info.json", environment)
@@ -193,16 +192,17 @@ def train_regular(dataset: str, seed: int, epochs: int, output_dir: Path, unifie
         "dataset": dataset,
         "seed": seed,
         "training_data": f"{dataset}_train.csv",
+        # Legacy protocol field: validation metrics are recorded, not used for selection.
         "selection_data": f"{dataset}_val.csv",
         "test_data_accessed_during_training": False,
-        "checkpoint_and_threshold_selection": (
-            "checkpoint: maximum validation AUROC, tie validation AUPRC; threshold: maximum validation MCC"
-            if unified_selection else ("checkpoint selected on validation; threshold fixed to the validation-constrained operating point in config.py" if dataset == "interpep" else "validation only")
-        ),
-        "test_policy": "run test.py after training; fixed validation threshold; no test threshold search",
+        # Legacy schema key; the value records that no runtime selection occurs.
+        "checkpoint_and_threshold_selection": "fixed paper epoch and fixed paper threshold from config.py",
+        "test_policy": "run test.py after training; fixed paper threshold; no test threshold search",
     })
     result = runner.train_trial(config, output_dir, args, (sys.modules[__name__], dataloaders, models), environment)
-    lock = {
+    # Legacy artifact name/fields retained for test.py and existing release tooling.
+    # This record describes the fixed paper checkpoint, not a selected winner.
+    fixed_checkpoint_record = {
         "dataset": dataset,
         "seed": seed,
         "trial_id": result["trial_id"],
@@ -214,7 +214,7 @@ def train_regular(dataset: str, seed: int, epochs: int, output_dir: Path, unifie
         "test_status": "not_evaluated",
     }
     runner.write_json(output_dir / "training_result.json", result)
-    runner.write_json(output_dir / "locked_validation_winner.json", lock)
+    runner.write_json(output_dir / "locked_validation_winner.json", fixed_checkpoint_record)
 
 
 def train_bitenet(seed: int, output_dir: Path) -> None:
@@ -239,6 +239,7 @@ def train_bitenet(seed: int, output_dir: Path) -> None:
     })
     base.atomic_json(variant_dir / "result.json", result)
     base.atomic_json(output_dir / "training_result.json", result)
+    # Legacy artifact name retained because test.py requires it.
     base.atomic_json(output_dir / "locked_validation_winner.json", {
         "dataset": "bitenet",
         "seed": seed,
@@ -257,7 +258,6 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=35)
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--unified-selection", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -268,7 +268,6 @@ def main() -> None:
         raise ValueError("Final PepMamba reproduction is fixed to seed=42")
     if args.epochs != 35:
         raise ValueError("Final PepMamba reproduction requires 35 epochs")
-    validate_inputs(args.dataset)
     output_dir = (args.output_dir or default_output(args.dataset, args.seed)).resolve()
     summary = {
         "dataset": args.dataset,
@@ -278,11 +277,11 @@ def main() -> None:
         "parameters": BEST_PARAMS[args.dataset],
         "training_reads": [f"{args.dataset}_train.csv", f"{args.dataset}_val.csv"],
         "test_data_accessed": False,
-        "unified_selection": args.unified_selection,
     }
     if args.dry_run:
         print(json.dumps(summary, indent=2, ensure_ascii=False))
         return
+    validate_inputs(args.dataset)
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
     if output_dir.exists():
@@ -300,7 +299,7 @@ def main() -> None:
     if args.dataset == "bitenet":
         train_bitenet(args.seed, output_dir)
     else:
-        train_regular(args.dataset, args.seed, args.epochs, output_dir, args.unified_selection)
+        train_regular(args.dataset, args.seed, args.epochs, output_dir)
     print(f"Training complete: {output_dir}")
     print(f"Next: python test.py --dataset {args.dataset} --seed {args.seed}")
 

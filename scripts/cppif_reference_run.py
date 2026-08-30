@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Protocol-locked UMPPI reference run selected exclusively on validation."""
+"""Protocol-locked CPPIF external benchmark run selected on validation."""
 from __future__ import annotations
 import hashlib,json,math,os,platform,random,sys
 from collections import defaultdict
@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 ROOT=Path(__file__).resolve().parents[1]; sys.path[:0]=[str(ROOT),str(ROOT/'scripts')]
 from config import BEST_PARAMS,MODEL_CONFIG
 from models import PepMamba
-from umppi_dataset import UMppiProteinSiteDataset,umppi_collate
+from cppif_dataset import CPPIFProteinSiteDataset,cppif_collate
 
 def seed_all(seed):
  random.seed(seed); np.random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
@@ -93,7 +93,7 @@ def record_metrics(records,frame,t):
  unique={'n_unique_test_proteins':len(groups),'n_valid_unique_test_proteins':len(pv),'macro_unique_protein_AUROC':float(np.mean([x[0] for x in pv])),'macro_unique_protein_MCC':float(np.mean([x[1] for x in pv]))}
  return rows,macro,unique
 def infer_pair(model,base,partner,t,device):
- item=dict(base); item['peptide']=partner['peptide']; item['peptide_length']=partner['peptide_length']; b=umppi_collate([item])
+ item=dict(base); item['peptide']=partner['peptide']; item['peptide_length']=partner['peptide_length']; b=cppif_collate([item])
  with torch.no_grad(): logits,_=model(b['peptide'].to(device),b['protein'].to(device),class_mask=b['protein_pad_mask'].to(device))
  y=item['labels'].numpy(); p=F.softmax(logits,dim=-1)[0,:len(y),1].cpu().numpy()
  return (roc_auc_score(y,p),binary(y,p,t)['mcc']) if len(np.unique(y))==2 else None
@@ -108,20 +108,20 @@ def env_info(): return {'python':sys.version,'platform':platform.platform(),'tor
 
 def main(seed=42,epochs=35):
  if seed!=42 or epochs!=35: raise ValueError('Formal reference protocol is locked to seed=42 and epochs=35')
- seed_all(seed); device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'); stamp=datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S'); out=ROOT/'tuning_results'/f'umppi_reference_seed42_{stamp}'; out.mkdir(parents=True,exist_ok=False); log=Logger(out/'train.log')
- data=ROOT/'data/umppi_protein_site'; emb=ROOT/'embeddings/umppi_esm2_650m'
+ seed_all(seed); device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'); stamp=datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S'); out=ROOT/'runs'/'cppif'/f'reference_seed42_{stamp}'; out.mkdir(parents=True,exist_ok=False); log=Logger(out/'train.log')
+ data=ROOT/'data/cppif'; emb=ROOT/'embeddings/cppif_esm2_650m'
  # Test is intentionally not read or instantiated before validation lock.
- train_ds=UMppiProteinSiteDataset(data/'train.csv',ROOT,emb); val_ds=UMppiProteinSiteDataset(data/'validation.csv',ROOT,emb)
+ train_ds=CPPIFProteinSiteDataset(data/'train.csv',ROOT,emb); val_ds=CPPIFProteinSiteDataset(data/'validation.csv',ROOT,emb)
  if (len(train_ds),len(val_ds))!=(4726,539): raise RuntimeError('locked train/validation counts changed')
  p=BEST_PARAMS['bitenet']; physical_batch=2; accumulation=12
- config={'experiment':'first UMPPI formal reference run','seed':seed,'epochs':epochs,'split_source':'clu_thre_0.0001/new_protein_balanced fold 0; train=group0-group1, validation=group1, test=group2','train_records':4726,'validation_records':539,'expected_test_records':1310,'learning_rate':p['lr'],'dropout':p['dropout'],'focal_alpha':p['alpha'],'focal_gamma':p['gamma'],'ce_weight':p['ce_weight'],'weight_decay':p['weight_decay'],'configured_effective_batch_size':p['batch_size'],'physical_batch_size':physical_batch,'gradient_accumulation_steps':accumulation,'class_weight_power':p['class_weight_power'],'max_pos_weight':p['max_pos_weight'],'grad_clip':p['grad_clip'],'n_layers':p['n_layers'],'model_config':MODEL_CONFIG,'scheduler':{'name':'CosineAnnealingWarmRestarts','T_0':p['scheduler_t0'],'eta_min':1e-7},'checkpoint_selection':['validation_AUROC','validation_AUPRC','validation_MCC'],'threshold':{'split':'validation','minimum':.05,'maximum':.95,'step':.005,'selection':['MCC','F1','lower_threshold']},'test_used_for_selection':False,'test_threshold_search_performed':False,'sequence_truncation':False,'silent_clipping':False,'environment':env_info()}
+ config={'experiment':'first CPPIF external benchmark formal reference run','seed':seed,'epochs':epochs,'split_source':'clu_thre_0.0001/new_protein_balanced fold 0; train=group0-group1, validation=group1, test=group2','train_records':4726,'validation_records':539,'expected_test_records':1310,'learning_rate':p['lr'],'dropout':p['dropout'],'focal_alpha':p['alpha'],'focal_gamma':p['gamma'],'ce_weight':p['ce_weight'],'weight_decay':p['weight_decay'],'configured_effective_batch_size':p['batch_size'],'physical_batch_size':physical_batch,'gradient_accumulation_steps':accumulation,'class_weight_power':p['class_weight_power'],'max_pos_weight':p['max_pos_weight'],'grad_clip':p['grad_clip'],'n_layers':p['n_layers'],'model_config':MODEL_CONFIG,'scheduler':{'name':'CosineAnnealingWarmRestarts','T_0':p['scheduler_t0'],'eta_min':1e-7},'checkpoint_selection':['validation_AUROC','validation_AUPRC','validation_MCC'],'threshold':{'split':'validation','minimum':.05,'maximum':.95,'step':.005,'selection':['MCC','F1','lower_threshold']},'test_used_for_selection':False,'test_threshold_search_performed':False,'sequence_truncation':False,'silent_clipping':False,'environment':env_info()}
  write_json(out/'config.json',config); log('CONFIG_LOCKED '+json.dumps(config,default=jd))
  txt=''.join(train_ds.frame.protein_residue_label.astype(str)); positives=txt.count('1'); negatives=txt.count('0'); pos_weight=min((negatives/positives)**p['class_weight_power'],p['max_pos_weight']); weights=torch.tensor([1.,pos_weight],device=device)
  model=PepMamba(n_layers=p['n_layers'],d_model=MODEL_CONFIG['d_model'],n_head=MODEL_CONFIG['n_head'],d_k=MODEL_CONFIG['d_k'],d_v=MODEL_CONFIG['d_v'],d_inner=MODEL_CONFIG['d_inner'],dropout=p['dropout']).to(device)
  loss_fn=HybridLoss(p['ce_weight'],weights,p['alpha'],p['gamma']); optimizer=torch.optim.AdamW(model.parameters(),lr=p['lr'],weight_decay=p['weight_decay']); scheduler=torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=p['scheduler_t0'],eta_min=1e-7)
- val_loader=DataLoader(val_ds,batch_size=1,shuffle=False,num_workers=0,collate_fn=umppi_collate,pin_memory=True); history=[]; best_key=None; checkpoint=out/'best_validation_checkpoint.pth'
+ val_loader=DataLoader(val_ds,batch_size=1,shuffle=False,num_workers=0,collate_fn=cppif_collate,pin_memory=True); history=[]; best_key=None; checkpoint=out/'best_validation_checkpoint.pth'
  for epoch in range(1,epochs+1):
-  gen=torch.Generator().manual_seed(seed+epoch); loader=DataLoader(train_ds,batch_size=physical_batch,shuffle=True,generator=gen,num_workers=0,collate_fn=umppi_collate,pin_memory=True)
+  gen=torch.Generator().manual_seed(seed+epoch); loader=DataLoader(train_ds,batch_size=physical_batch,shuffle=True,generator=gen,num_workers=0,collate_fn=cppif_collate,pin_memory=True)
   model.train(); optimizer.zero_grad(set_to_none=True); losses=[]; tys=[]; tps=[]; acc=0
   for step,b in enumerate(loader,1):
    protein=b['protein'].to(device,non_blocking=True); peptide=b['peptide'].to(device,non_blocking=True); targets=b['labels'].to(device); mask=b['protein_pad_mask'].to(device); logits,_=model(peptide,protein,class_mask=mask); loss=loss_fn(logits,targets)
@@ -136,14 +136,18 @@ def main(seed=42,epochs=35):
  vy,vp,vrecords=collect(model,val_loader,device); rows,chosen=scan(vy,vp); write_csv(out/'validation_threshold_scan.csv',rows); save_predictions(out/'validation_predictions.npz',vy,vp,vrecords)
  lock={'best_epoch':state['best_epoch'],'validation_AUROC':float(roc_auc_score(vy,vp)),'validation_AUPRC':float(average_precision_score(vy,vp)),'validation_MCC':chosen['mcc'],'selected_threshold':chosen['threshold'],'selection':'maximum validation MCC; tie F1; then lower threshold','checkpoint_sha256':digest,'test_loaded_before_lock':False,'locked_at':datetime.now(timezone.utc).isoformat()}; write_json(out/'selected_validation_threshold.json',lock); log('VALIDATION_LOCKED '+json.dumps(lock))
  # Test access starts only after the durable checkpoint/threshold lock above.
- test_ds=UMppiProteinSiteDataset(data/'test.csv',ROOT,emb)
+ test_ds=CPPIFProteinSiteDataset(data/'test.csv',ROOT,emb)
  if len(test_ds)!=1310: raise RuntimeError('locked test count changed')
  train=train_ds.frame.copy(); val=val_ds.frame.copy(); test=test_ds.frame.copy(); stats=split_stats(train,val,test); manifest=[]
  for split,frame in [('train',train),('validation',val),('test',test)]:
   for _,r in frame.iterrows(): manifest.append({'split':split,'record_id':r.record_id,'dataset_index':r.dataset_index,'protein_sequence_hash':r.protein_sequence_hash,'peptide_sequence_hash':r.peptide_sequence_hash,'protein_length':len(r.prot_seq),'peptide_length':len(r.pep_seq)})
- write_csv(out/'split_manifest.csv',manifest); test_loader=DataLoader(test_ds,batch_size=1,shuffle=False,num_workers=0,collate_fn=umppi_collate,pin_memory=True); test_y,test_p,test_records=collect(model,test_loader,device); t=chosen['threshold']; save_predictions(out/'test_predictions.npz',test_y,test_p,test_records)
+ write_csv(out/'split_manifest.csv',manifest); test_loader=DataLoader(test_ds,batch_size=1,shuffle=False,num_workers=0,collate_fn=cppif_collate,pin_memory=True); test_y,test_p,test_records=collect(model,test_loader,device); t=chosen['threshold']; save_predictions(out/'test_predictions.npz',test_y,test_p,test_records)
  pm={'auroc':float(roc_auc_score(test_y,test_p)),'auprc':float(average_precision_score(test_y,test_p)),'threshold':t,**binary(test_y,test_p,t)}; recs,macro,unique=record_metrics(test_records,test,t); write_csv(out/'per_record_metrics.csv',recs); write_json(out/'pooled_test_metrics.json',pm); write_json(out/'macro_test_metrics.json',macro); write_json(out/'unique_protein_metrics.json',unique)
  sh=partner_shuffle(model,test_ds,t,device,[42,123,3407,7169,8873],200); write_csv(out/'partner_shuffle_analysis.csv',sh); sa=np.asarray([r['shuffled_peptide_mean_AUROC'] for r in sh]); sm=np.asarray([r['shuffled_peptide_mean_MCC'] for r in sh]); (out/'partner_shuffle_report.md').write_text(f"# Partner-shuffle analysis\n\n- Frozen checkpoint: `{digest}`\n- Selection role: none\n- Records sampled: {sh[0]['n_records']}\n- Correct peptide AUROC/MCC: {sh[0]['correct_peptide_mean_AUROC']:.6f} / {sh[0]['correct_peptide_mean_MCC']:.6f}\n- Shuffled peptide AUROC: {sa.mean():.6f} ± {sa.std():.6f}\n- Shuffled peptide MCC: {sm.mean():.6f} ± {sm.std():.6f}\n")
  ef1=2*pm['precision']*pm['recall']/max(pm['precision']+pm['recall'],1e-15); integrity={'label_alignment_pass':'100%','embedding_alignment_pass':'100%','sequence_truncation':False,'silent_clipping':False,**stats,'test_used_for_selection':False,'test_threshold_search_performed':False,'f1_formula_pass':abs(ef1-pm['f1'])<1e-12,'mcc_confusion_recompute_pass':abs(binary(test_y,test_p,t)['mcc']-pm['mcc'])<1e-12}
- report=f"# FINAL UMPPI reference report\n\n## Locked protocol\n\n- Seed / epochs: {seed} / {epochs}\n- Best epoch: {state['best_epoch']}\n- Checkpoint SHA-256: `{digest}`\n- Validation AUROC/AUPRC/MCC: {lock['validation_AUROC']:.6f} / {lock['validation_AUPRC']:.6f} / {lock['validation_MCC']:.6f}\n- Validation-selected threshold: {t:.3f}\n- Test used for selection: false\n- Test threshold search performed: false\n\n## UMPPI-compatible macro-record test metrics\n\n- Mean AUROC / MCC: {macro['mean_record_AUROC']:.6f} / {macro['mean_record_MCC']:.6f}\n- Median AUROC / MCC: {macro['median_record_AUROC']:.6f} / {macro['median_record_MCC']:.6f}\n- Std AUROC / MCC: {macro['std_record_AUROC']:.6f} / {macro['std_record_MCC']:.6f}\n- Valid records: {macro['n_valid_records']}\n\n## Pooled test metrics\n\n```json\n{json.dumps(pm,indent=2)}\n```\n\n## Unique-protein secondary metrics\n\n```json\n{json.dumps(unique,indent=2)}\n```\n\n## Integrity\n\n```json\n{json.dumps(integrity,indent=2)}\n```\n"; (out/'FINAL_UMPPI_REPORT.md').write_text(report); log(f'COMPLETE output_dir={out}')
+ report=f"# FINAL CPPIF external benchmark report\n\n## Locked protocol\n\n- Seed / epochs: {seed} / {epochs}\n- Best epoch: {state['best_epoch']}\n- Checkpoint SHA-256: `{digest}`\n- Validation AUROC/AUPRC/MCC: {lock['validation_AUROC']:.6f} / {lock['validation_AUPRC']:.6f} / {lock['validation_MCC']:.6f}\n- Validation-selected threshold: {t:.3f}\n- Test used for selection: false\n- Test threshold search performed: false\n\n## CPPIF external benchmark macro-record test metrics\n\n- Mean AUROC / MCC: {macro['mean_record_AUROC']:.6f} / {macro['mean_record_MCC']:.6f}\n- Median AUROC / MCC: {macro['median_record_AUROC']:.6f} / {macro['median_record_MCC']:.6f}\n- Std AUROC / MCC: {macro['std_record_AUROC']:.6f} / {macro['std_record_MCC']:.6f}\n- Valid records: {macro['n_valid_records']}\n\n## Pooled test metrics\n\n```json\n{json.dumps(pm,indent=2)}\n```\n\n## Unique-protein secondary metrics\n\n```json\n{json.dumps(unique,indent=2)}\n```\n\n## Integrity\n\n```json\n{json.dumps(integrity,indent=2)}\n```\n"; (out/'FINAL_CPPIF_REPORT.md').write_text(report); log(f'COMPLETE output_dir={out}')
  print(json.dumps({'output_dir':str(out),'best_epoch':state['best_epoch'],'threshold':t,'macro':macro,'pooled':pm,'unique_protein':unique,'integrity':integrity},indent=2))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strict, no-clipping UMPPI protein-residue dataset."""
+"""Strict, no-clipping dataset for the CPPIF external benchmark."""
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -8,7 +8,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 
 
-class UMppiProteinSiteDataset(Dataset):
+class CPPIFProteinSiteDataset(Dataset):
     def __init__(self, csv_path, project_root, embedding_dir):
         self.csv_path=Path(csv_path); self.root=Path(project_root); self.embedding_dir=Path(embedding_dir)
         self.frame=pd.read_csv(self.csv_path,dtype=str,keep_default_na=False)
@@ -39,7 +39,7 @@ class UMppiProteinSiteDataset(Dataset):
                 'peptide':peptide_value,'labels':labels,'protein_length':len(protein),'peptide_length':len(peptide)}
 
 
-def umppi_collate(batch):
+def cppif_collate(batch):
     proteins=[x['protein'] for x in batch]; peptides=[x['peptide'] for x in batch]; labels=[x['labels'] for x in batch]
     protein_pad=pad_sequence(proteins,batch_first=True,padding_value=0.0)
     peptide_pad=pad_sequence(peptides,batch_first=True,padding_value=0.0)

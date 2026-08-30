@@ -7,7 +7,7 @@ from modules import SequenceFFN, TwoWayMambaBlock
 
 
 class ConvPositionEncoding(nn.Module):
-    """Simple depthwise conv positional encoding."""
+    """Add depthwise-convolutional position encoding to ``(batch, length, dim)`` features."""
 
     def __init__(self, d_model):
         super().__init__()
@@ -20,12 +20,13 @@ class ConvPositionEncoding(nn.Module):
         )
 
     def forward(self, x):
+        """Return position-enhanced features with the same shape as ``x``."""
         pe = self.pe_conv(x.transpose(1, 2)).transpose(1, 2)
         return x + pe
 
 
 class PepMambaLayer(nn.Module):
-    """One layer of two-way interaction plus post-fusion refinement."""
+    """Apply two-way protein-peptide interaction followed by stream-specific refinement."""
 
     def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.3):
         super().__init__()
@@ -33,8 +34,8 @@ class PepMambaLayer(nn.Module):
         self.protein_ffn = SequenceFFN(d_model, d_inner, dropout=dropout)
         self.peptide_ffn = SequenceFFN(d_model, d_inner, dropout=dropout)
 
-    # 【修改点 1】: 将 class_mask 替换为分离的 protein_mask 和 peptide_mask
     def forward(self, protein_feat, peptide_feat, protein_mask=None, peptide_mask=None):
+        """Process both streams; mask values are ``True`` at padded positions."""
         protein_feat, peptide_feat, attn, _ = self.interaction(
             protein_feat, peptide_feat, protein_mask=protein_mask, peptide_mask=peptide_mask
         )
@@ -44,7 +45,7 @@ class PepMambaLayer(nn.Module):
 
 
 class PepMambaEncoder(nn.Module):
-    """Project protein and peptide features, then stack interaction layers."""
+    """Project protein and peptide ESM features and stack interaction layers."""
 
     def __init__(self, n_layers, d_model, n_head, d_k, d_v, d_inner, dropout=0.3):
         super().__init__()
@@ -61,7 +62,8 @@ class PepMambaEncoder(nn.Module):
         )
 
     def forward(self, peptide_sequence, protein_sequence, class_mask=None):
-        # 【修改点 2】: 在网络的最入口处生成 peptide_pad_mask，此时特征绝对干净，eq(0) 是绝对安全的
+        """Encode both sequences; ``class_mask`` is the legacy protein padding mask name."""
+        # Build the peptide padding mask from padded ESM features before projection.
         peptide_pad_mask = peptide_sequence.abs().sum(dim=-1).eq(0)
 
         peptide_hidden = self.peptide_proj(peptide_sequence)
@@ -73,7 +75,7 @@ class PepMambaEncoder(nn.Module):
 
         attention_maps = []
         for layer in self.layers:
-            # 【修改点 3】: 将入口处生成的 peptide_pad_mask 和外部传入的 class_mask(即protein_mask) 穿透传给每层
+            # Pass protein and peptide padding masks separately to each layer.
             protein_hidden, peptide_hidden, attn, _ = layer(
                 protein_hidden, peptide_hidden, protein_mask=class_mask, peptide_mask=peptide_pad_mask
             )
@@ -83,11 +85,7 @@ class PepMambaEncoder(nn.Module):
 
 
 class ResiduePredictionHead(nn.Module):
-    """
-    Predict binding residues on protein positions.
-    Two protein-side streams:
-    raw protein + updated protein -> multi-scale conv fusion -> Transformer classifier -> logits.
-    """
+    """Predict per-residue logits from raw and interaction-refined protein streams."""
 
     def __init__(self, d_model, dropout=0.3):
         super().__init__()
@@ -132,7 +130,13 @@ class ResiduePredictionHead(nn.Module):
         peptide_pad_mask=None,
         protein_pad_mask=None,
     ):
-        # Only keep two protein-side streams: original protein prior and peptide-conditioned protein feature.
+        """Return ``(batch, protein_length, 2)`` logits and classifier attention.
+
+        ``peptide_hidden`` and ``peptide_pad_mask`` are retained for backward
+        compatibility and are unused by the current two-stream protein head.
+        ``protein_pad_mask`` is ``True`` at padded protein positions.
+        """
+        # Fuse the original and interaction-refined protein streams.
         x_concat = torch.cat([protein_skip, protein_hidden], dim=-1)
         x_base = self.recalibrator(x_concat)
 
@@ -167,12 +171,19 @@ class ResiduePredictionHead(nn.Module):
 
 
 class PepMamba(nn.Module):
+    """Predict protein-residue classes and return auxiliary attention maps."""
+
     def __init__(self, n_layers, d_model, n_head, d_k, d_v, d_inner, dropout=0.3):
         super().__init__()
         self.encoder = PepMambaEncoder(n_layers, d_model, n_head, d_k, d_v, d_inner, dropout)
         self.head = ResiduePredictionHead(d_model, dropout=dropout)
 
     def forward(self, peptide_sequence, protein_sequence, class_mask=None):
+        """Return residue logits and attention maps.
+
+        ``class_mask`` is retained for backward compatibility and denotes the
+        protein padding mask, with ``True`` at invalid positions.
+        """
         protein_hidden, peptide_hidden, attention_maps, protein_skip, peptide_pad_mask = self.encoder(
             peptide_sequence, protein_sequence, class_mask=class_mask
         )
@@ -191,7 +202,7 @@ class PepMamba(nn.Module):
         return logits, attention_maps
 
 
-# Backward-compatible aliases
+# Legacy aliases retained for backward compatibility.
 ConvPositionalEncoding = ConvPositionEncoding
 MultiModalLayer = PepMambaLayer
 RepeatedModule = PepMambaEncoder

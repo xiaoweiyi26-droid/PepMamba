@@ -1,0 +1,30 @@
+Mamba / mamba-ssm
+-----------------
+
+Upstream project: Mamba
+Source: https://github.com/state-spaces/mamba
+Upstream license: Apache License 2.0
+
+PepMamba depends on the upstream mamba-ssm implementation. The bundled
+mamba3_bio.py is a modified BioMamba adaptation derived from the Mamba
+implementation for protein¨Cpeptide sequence modeling.
+
+Applicable upstream copyright and attribution notices are retained in the
+source file. mamba3_bio.py contains modifications made for PepMamba and is
+not presented as an unmodified upstream Mamba file.
+
+Redistribution must comply with the Apache License 2.0, including preservation
+of the license and applicable copyright and attribution notices, and prominent
+identification of modified files.
+
+See the repository LICENSE file for the full Apache License 2.0 text.
+
+Other dependencies and data
+---------------------------
+
+PepMamba also depends on PyTorch, causal-conv1d, Triton, ESM, and the packages
+listed in requirements.txt. These dependencies are not redistributed in this
+repository and remain subject to their respective upstream licenses.
+
+Benchmark datasets, generated ESM-2 embeddings, pretrained weights, and release
+checkpoints may also be subject to their respective source-specific terms.

@@ -57,6 +57,8 @@ FINAL_PARAMS = {
     "grad_clip": 1.0,
     "n_layers": 3,
     "epochs": EPOCHS,
+    "best_epoch": 27,
+    "threshold": 0.6099999999999998,
 }
 
 BASE_MODEL_CONFIG = {
@@ -320,12 +322,9 @@ def evaluate(model, loader, device, criterion=None, threshold=None):
         "auprc": float(average_precision_score(labels, scores)),
     }
     if threshold is None:
-        _, best = threshold_scan(labels, scores)
-        result["threshold"] = best["threshold"]
-        result.update({key: best[key] for key in ["sensitivity", "specificity", "precision", "f1", "mcc"]})
-    else:
-        result["threshold"] = float(threshold)
-        result.update(metrics_at_threshold(labels, scores, threshold))
+        raise RuntimeError("Fixed paper threshold is required")
+    result["threshold"] = float(threshold)
+    result.update(metrics_at_threshold(labels, scores, threshold))
     return result
 
 
@@ -586,9 +585,9 @@ def run_variant(run_dir, variant, device, evaluate_test=True):
         optimizer, T_0=FINAL_PARAMS["scheduler_t0"], T_mult=1, eta_min=1e-7
     )
 
-    best_state = None
-    best_val = None
-    best_epoch = -1
+    fixed_state = None
+    fixed_val = None
+    fixed_epoch = FINAL_PARAMS["best_epoch"]
     history = []
     for epoch in range(1, EPOCHS + 1):
         model.train()
@@ -608,7 +607,7 @@ def run_variant(run_dir, variant, device, evaluate_test=True):
             train_loss += loss.item()
             batches += 1
         scheduler.step(epoch)
-        val = evaluate(model, val_loader, device, criterion)
+        val = evaluate(model, val_loader, device, criterion, FINAL_PARAMS["threshold"])
         row = {"epoch": epoch, "train_loss": train_loss / max(batches, 1), **val}
         history.append(row)
         atomic_json(variant_dir / "epoch_history.json", history)
@@ -618,22 +617,22 @@ def run_variant(run_dir, variant, device, evaluate_test=True):
             f"val_auprc={val['auprc']:.4f} val_mcc={val['mcc']:.4f} threshold={val['threshold']:.2f}",
             flush=True,
         )
-        score = (val["auc"], val["auprc"])
-        best_score = (-1.0, -1.0) if best_val is None else (best_val["auc"], best_val["auprc"])
-        if score > best_score:
-            best_val = val
-            best_epoch = epoch
-            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-            torch.save(best_state, variant_dir / "best_state.pth")
-            torch.save(best_state, variant_dir / "best_checkpoint.pth")
-            atomic_json(variant_dir / "best_validation.json", {"epoch": best_epoch, **best_val})
+        if epoch == fixed_epoch:
+            fixed_val = val
+            fixed_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            torch.save(fixed_state, variant_dir / "best_state.pth")
+            torch.save(fixed_state, variant_dir / "best_checkpoint.pth")
+            atomic_json(variant_dir / "fixed_paper_epoch.json", {"epoch": fixed_epoch, **fixed_val})
 
-    model.load_state_dict(best_state)
+    if fixed_state is None:
+        raise RuntimeError(f"Fixed paper epoch {fixed_epoch} was not reached")
+    model.load_state_dict(fixed_state)
     val_labels, val_scores, _ = collect_scores(model, val_loader, device)
     test_labels = test_scores = None
     if evaluate_test:
         test_labels, test_scores, _ = collect_scores(model, test_loader, device)
-    scan_rows, selected = threshold_scan(val_labels, val_scores)
+    selected = {"threshold": FINAL_PARAMS["threshold"], **metrics_at_threshold(val_labels, val_scores, FINAL_PARAMS["threshold"])}
+    scan_rows = [selected]
     scan_headers = list(scan_rows[0].keys())
     write_table_csv(variant_dir / "threshold_scan.csv", scan_rows, scan_headers)
     write_xlsx(variant_dir / "threshold_scan.xlsx", {"threshold_scan": [scan_headers] + [[row[key] for key in scan_headers] for row in scan_rows]})
@@ -664,34 +663,34 @@ def run_variant(run_dir, variant, device, evaluate_test=True):
         "model_config": BASE_MODEL_CONFIG,
         "pos_weight": pos_weight,
         "epochs_completed": EPOCHS,
-        "best_epoch": best_epoch,
+        "best_epoch": fixed_epoch,
         "validation": {
-            "loss": best_val["loss"],
+            "loss": fixed_val["loss"],
             "auc": float(roc_auc_score(val_labels, val_scores)),
             "auprc": float(average_precision_score(val_labels, val_scores)),
             "threshold": selected["threshold"],
             **{key: selected[key] for key in ["sensitivity", "specificity", "precision", "f1", "mcc"]},
         },
         "test": test,
-        "selected_threshold_source": "validation_mcc_scan",
+        "selected_threshold_source": "fixed paper threshold from config",
         "elapsed_sec": time.time() - start,
     }
     atomic_json(variant_dir / "test_metrics.json", test)
     atomic_json(variant_dir / "result.json", result)
     if evaluate_test:
         print(
-            f"[{variant.get('log_label', variant['label'])}] done best_epoch={best_epoch} "
+            f"[{variant.get('log_label', variant['label'])}] done best_epoch={fixed_epoch} "
             f"test_auc={test['auc']:.4f} test_mcc={test['mcc']:.4f} threshold={test['threshold']:.2f}",
             flush=True,
         )
     else:
         print(
-            f"[{variant.get('log_label', variant['label'])}] training done best_epoch={best_epoch} "
+            f"[{variant.get('log_label', variant['label'])}] training done best_epoch={fixed_epoch} "
             f"val_auc={result['validation']['auc']:.4f} threshold={result['validation']['threshold']:.2f}; test not evaluated",
             flush=True,
         )
     del model, optimizer, scheduler, criterion, train_loader, val_loader
-    del train_dataset, val_dataset, best_state
+    del train_dataset, val_dataset, fixed_state
     if test_loader is not None:
         del test_loader
     if test_dataset is not None:

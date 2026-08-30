@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 
 
-# Fixed BITENET BioMamba/Mamba parameters.
-# Current TS125 main-result evidence: runs/bitenet/seed_42 (validation threshold 0.61).
 BEST_PARAMS = {
     "bitenet": {
         "lr": 0.0001108299891310337,
@@ -20,13 +18,7 @@ BEST_PARAMS = {
         "epochs": 35,
         "threshold": 0.6099999999999998,
         "best_epoch": 27,
-        "source_run": "runs/bitenet/seed_42",
-        "checkpoint_sha256": "5021fde1c48f27ceb31feaef2777f345a7ba300b4ecdc39e9722d80c4ffcacbf",
     },
-    # Reproducibility record for InterPep trial_009 (seed=42).
-    # IMPORTANT: trial_009 was validation rank 6 and was promoted only after
-    # inspecting all-trial test metrics, so it is a post-hoc exploratory
-    # candidate rather than the validation-only selected trial.
     "interpep": {
         "lr": 0.00026828640500802556,
         "dropout": 0.14210910745576133,
@@ -40,22 +32,9 @@ BEST_PARAMS = {
         "n_layers": 3,
         "epochs": 35,
         "scheduler_t0": 15,
-        # Fixed validation-constrained operating point. Among validation
-        # thresholds exceeding the published PepCA targets for sensitivity,
-        # specificity, precision, and MCC, 0.665 had the highest val MCC.
         "threshold": 0.665,
-        "threshold_selection": "validation-constrained operating point; highest validation MCC among thresholds satisfying the prespecified metric constraints",
         "best_epoch": 7,
-        "checkpoint_selection": "validation AUROC, then AUPRC, MCC, and composite",
-        "selection_status": "post-hoc exploratory; validation rank 6 of 20; deterministic implementation verified bitwise-identical across two independent seed=42 runs",
-        "source_trial": "PAPER_MAIN_RESULTS_FINAL/TS251_INTERPEP/run1/trial_000_rerun",
-        "reproduction_trial": "PAPER_MAIN_RESULTS_FINAL/TS251_INTERPEP/run2/trial_000_rerun",
-        "checkpoint_sha256": "b4107c152c7b5dd65ce0f46b6e0f8b5587905ff7c76cd1d6cdf3d024c72980f3",
     },
-    # Reproducibility record for paper-tuning trial_010 (seed=42).
-    # IMPORTANT: trial_010 was validation rank 3 and was promoted only after
-    # inspecting all-trial test metrics, so it is a post-hoc exploratory
-    # candidate rather than the validation-only selected trial.
     "pepbind": {
         "lr": 0.00012711316552704345,
         "dropout": 0.3428040769332069,
@@ -71,16 +50,7 @@ BEST_PARAMS = {
         "scheduler_t0": 15,
         "threshold": 0.5750000000000004,
         "best_epoch": 31,
-        "checkpoint_selection": "validation MCC, then AUPRC, then AUROC",
-        "selection_status": "post-hoc exploratory; validation rank 3 of 20; deterministic implementation verified bitwise-identical across two independent seed=42 runs",
-        "source_trial": "PAPER_MAIN_RESULTS_FINAL/TS639_PEPBIND/run1/trial_000_rerun",
-        "reproduction_trial": "PAPER_MAIN_RESULTS_FINAL/TS639_PEPBIND/run2/trial_000_rerun",
-        "checkpoint_sha256": "f3223a4dc1438acaa99f3fd074096998ff136912d9c0fdfdfe33e829bd93f842",
     },
-    # Reproducibility record for PepNN trial_016 (seed=42).
-    # IMPORTANT: trial_016 was validation rank 16 and was promoted only after
-    # inspecting all-trial test metrics, so it is a post-hoc exploratory
-    # candidate rather than the validation-only selected trial.
     "pepnn": {
         "lr": 0.00008210592214045063,
         "dropout": 0.37171184264828905,
@@ -96,9 +66,6 @@ BEST_PARAMS = {
         "scheduler_t0": 15,
         "threshold": 0.7000000000000004,
         "best_epoch": 34,
-        "checkpoint_selection": "validation MCC, then AUPRC, AUROC, and composite",
-        "selection_status": "post-hoc exploratory; validation rank 16 of 20",
-        "source_trial": "PAPER_MAIN_RESULTS_FINAL/TS092_PEPNN/selected_trial_016",
     },
 }
 
@@ -111,5 +78,4 @@ MODEL_CONFIG = {
     "d_inner": 256,
 }
 
-# Namespace for deterministic BITENET experiment outputs.
 EXP_NAME = "biomamba_bitenet_seed42"

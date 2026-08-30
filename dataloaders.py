@@ -21,7 +21,15 @@ class PepMambaDataset(Dataset):
         self.esm_feat_dim = esm_feat_dim
 
         csv_name = f"{data_set}_{mode}.csv"
-        self.df = pd.read_csv(os.path.join(df_dir, csv_name))
+        self.df = pd.read_csv(
+            os.path.join(df_dir, csv_name),
+            dtype={"Pep_seq": str, "Prot_seq": str, "label": str},
+            keep_default_na=False,
+        )
+        required_columns = {"Pep_seq", "Prot_seq", "label"}
+        missing_columns = required_columns.difference(self.df.columns)
+        if missing_columns:
+            raise ValueError(f"Missing required CSV columns: {sorted(missing_columns)}")
 
         with open(prot_pkl_path, "rb") as f:
             self.prot_feat_dict = pickle.load(f)
@@ -31,19 +39,15 @@ class PepMambaDataset(Dataset):
 
     @staticmethod
     def _parse_binary_label_string(target_str):
-        """
-        More robust than raw character-by-character parsing.
-        Supports compact strings like '001010' and strings containing separators.
-        """
-        filtered = [c for c in str(target_str).strip() if c in {"0", "1"}]
-        return torch.tensor([int(c) for c in filtered], dtype=torch.long)
+        target = str(target_str)
+        if not target or any(c not in {"0", "1"} for c in target):
+            raise ValueError("label must be a non-empty contiguous binary string")
+        return torch.tensor([int(c) for c in target], dtype=torch.long)
 
     def _load_feature(self, seq, feat_dict):
-        if seq in feat_dict:
-            feat = torch.from_numpy(feat_dict[seq]).float()
-        else:
-            feat = torch.zeros((len(seq), self.esm_feat_dim), dtype=torch.float32)
-        return feat
+        if seq not in feat_dict:
+            raise KeyError(f"Sequence is missing from the ESM feature dictionary: {seq}")
+        return torch.from_numpy(feat_dict[seq]).float()
 
     def __getitem__(self, index):
         row = self.df.iloc[index]
@@ -55,14 +59,21 @@ class PepMambaDataset(Dataset):
         pep_feat = self._load_feature(pep_seq, self.pep_feat_dict)
         prot_feat = self._load_feature(prot_seq, self.prot_feat_dict)
 
-        if pep_feat.ndim != 2 or pep_feat.shape[-1] != self.esm_feat_dim:
+        if pep_feat.ndim != 2 or pep_feat.shape[1] != self.esm_feat_dim:
             raise ValueError(f"Unexpected peptide feature shape: {tuple(pep_feat.shape)}")
-        if prot_feat.ndim != 2 or prot_feat.shape[-1] != self.esm_feat_dim:
+        if prot_feat.ndim != 2 or prot_feat.shape[1] != self.esm_feat_dim:
             raise ValueError(f"Unexpected protein feature shape: {tuple(prot_feat.shape)}")
 
-        min_len = min(prot_feat.shape[0], target.shape[0])
-        prot_feat = prot_feat[:min_len]
-        target = target[:min_len]
+        if not (len(target) == len(prot_seq) == prot_feat.shape[0]):
+            raise ValueError(
+                "Protein lengths disagree: "
+                f"label={len(target)}, sequence={len(prot_seq)}, feature={prot_feat.shape[0]}"
+            )
+        if len(pep_seq) != pep_feat.shape[0]:
+            raise ValueError(
+                "Peptide lengths disagree: "
+                f"sequence={len(pep_seq)}, feature={pep_feat.shape[0]}"
+            )
 
         if self.phase == "train":
             if torch.rand(1).item() < 0.5:

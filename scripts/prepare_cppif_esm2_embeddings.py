@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate length-preserving UMPPI ESM-2 embeddings with overlapping windows.
+"""Generate length-preserving CPPIF external benchmark ESM-2 embeddings with overlapping windows.
 
 This is preprocessing only. It never trains PepMamba. Outputs are written to a
 new directory and existing paths are refused.
@@ -86,10 +86,10 @@ def main():
     args = parser.parse_args()
 
     project = args.project.resolve()
-    dataset_dir = (args.dataset_dir or project / "data/umppi_protein_site").resolve()
+    dataset_dir = (args.dataset_dir or project / "data/cppif").resolve()
     df = pd.concat([pd.read_csv(dataset_dir / f"{split}.csv", dtype=str, keep_default_na=False) for split in ("train", "validation", "test")], ignore_index=True)
     table = dataset_dir
-    output = (args.output_dir or project / "embeddings/umppi_esm2_650m").resolve()
+    output = (args.output_dir or project / "embeddings/cppif_esm2_650m").resolve()
     if output.exists() and not args.resume:
         raise FileExistsError(f"refusing to overwrite; use --resume: {output}")
     output.mkdir(parents=True, exist_ok=True)

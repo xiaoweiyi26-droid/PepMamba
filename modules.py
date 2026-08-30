@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 try:
-    from mamba3_bio import BioMamba3Block as BioMamba2Block
+    from mamba3_bio import BioMamba3Block
 except ImportError as exc:
     raise ImportError(
         "PepMamba requires the project-local mamba3_bio.py and a Mamba3-compatible mamba_ssm installation."
@@ -115,8 +115,8 @@ class BidirectionalMambaBlock(nn.Module):
 
     def __init__(self, d_model, d_state=128, dropout=0.2, **mamba_kwargs):
         super().__init__()
-        self.fwd_mamba = BioMamba2Block(d_model=d_model, d_state=d_state, dropout=dropout, **mamba_kwargs)
-        self.bwd_mamba = BioMamba2Block(d_model=d_model, d_state=d_state, dropout=dropout, **mamba_kwargs)
+        self.fwd_mamba = BioMamba3Block(d_model=d_model, d_state=d_state, dropout=dropout, **mamba_kwargs)
+        self.bwd_mamba = BioMamba3Block(d_model=d_model, d_state=d_state, dropout=dropout, **mamba_kwargs)
 
     def forward(self, x, mask=None):
         y_fwd = self.fwd_mamba(x)
@@ -192,10 +192,10 @@ class TwoWayMambaBlock(nn.Module):
         return fused, attn
 
     def forward(self, protein_feat, peptide_feat, protein_mask=None, peptide_mask=None):
-        """
-        Input changes:
-        - Replaced dynamic 'class_mask' with explicit 'protein_mask' and 'peptide_mask'.
-        - Both masks should be Boolean Tensors where `True` indicates a padding token.
+        """Fuse protein and peptide features with separate padding masks.
+
+        ``protein_mask`` and ``peptide_mask`` are Boolean tensors where
+        ``True`` denotes a padded position.
         """
         protein_local = self.protein_local(protein_feat)
         peptide_local = self.peptide_local(peptide_feat)
@@ -247,7 +247,8 @@ class TwoWayMambaBlock(nn.Module):
         return protein_out, peptide_out, attn_probs, None
 
 
-# Backward-compatible aliases
+# Legacy aliases retained for compatibility with existing scripts.
+BioMamba2Block = BioMamba3Block
 ECA1D = ChannelAttention1D
 LocalMotifExtractor = LocalPatternBlock
 ConvFFN = SequenceFFN

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate a trained PepMamba checkpoint at its locked validation threshold."""
+"""Evaluate the fixed paper checkpoint at the fixed paper threshold."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
+# Effective hash seeding requires exporting PYTHONHASHSEED before Python starts.
 os.environ.setdefault("PYTHONHASHSEED", "42")
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 os.environ.setdefault("NVIDIA_TF32_OVERRIDE", "0")
@@ -23,9 +24,12 @@ import numpy as np
 import torch
 from sklearn.metrics import average_precision_score, roc_auc_score
 
+from config import BEST_PARAMS
+
 ROOT = Path(__file__).resolve().parent
 FINAL_DIR = ROOT / "scripts" / "final"
 DATASETS = ("bitenet", "interpep", "pepbind", "pepnn")
+FIXED_EVALUATION_STATUS = "evaluated_once_with_fixed_paper_checkpoint_and_threshold"
 
 
 def sha256(path: Path) -> str:
@@ -60,9 +64,14 @@ def test_regular(dataset: str, seed: int, run_dir: Path) -> dict:
     if result["dataset"] != dataset or int(result["seed"]) != seed:
         raise RuntimeError("Training result dataset/seed does not match this test command")
     args = SimpleNamespace(dataset=dataset, seed=seed)
+    # Legacy runner API name retained for fixed-paper evaluation compatibility.
     result = runner.evaluate_locked_test(result, run_dir, args, (train_module, dataloaders, models))
+    test = result["test"]
+    test["status"] = FIXED_EVALUATION_STATUS
+    test.pop("test_used_for_selection", None)
+    test.pop("test_used_for_trial_selection", None)
     runner.write_json(run_dir / "test_result.json", result)
-    return result["test"]
+    return test
 
 
 def test_bitenet(seed: int, run_dir: Path) -> dict:
@@ -75,7 +84,7 @@ def test_bitenet(seed: int, run_dir: Path) -> dict:
     result = json.loads(result_path.read_text(encoding="utf-8"))
     checkpoint = Path(result["checkpoint"])
     if sha256(checkpoint) != result["checkpoint_sha256"]:
-        raise RuntimeError("Checkpoint SHA256 differs from the validation-locked record")
+        raise RuntimeError("Checkpoint SHA256 differs from the fixed paper training record")
     base.SEED = seed
     base.seed_everything(seed)
     device = torch.device("cuda")
@@ -84,17 +93,16 @@ def test_bitenet(seed: int, run_dir: Path) -> dict:
     model = base.AblationModel(True, True, result["model_config"], result["params"]["dropout"]).to(device)
     model.load_state_dict(torch.load(checkpoint, map_location="cpu"))
     labels, scores, _ = base.collect_scores(model, loader, device)
-    threshold = float(result["validation"]["threshold"])
+    threshold = float(BEST_PARAMS["bitenet"]["threshold"])
     metrics = base.metrics_at_threshold(labels, scores, threshold)
     test = {
-        "status": "evaluated_once_at_validation_threshold",
+        "status": FIXED_EVALUATION_STATUS,
         "loss": None,
         "auc": float(roc_auc_score(labels, scores)),
         "auprc": float(average_precision_score(labels, scores)),
         "threshold": threshold,
         **metrics,
         "test_threshold_search_performed": False,
-        "test_used_for_selection": False,
     }
     variant_dir = runner.trial_dir(run_dir, seed)
     base.save_predictions(variant_dir / "test_predictions", labels, scores)
@@ -105,9 +113,8 @@ def test_bitenet(seed: int, run_dir: Path) -> dict:
     base.atomic_json(run_dir / "final_test_once.json", {
         "dataset": "bitenet",
         "seed": seed,
-        "validation_threshold": threshold,
+        "fixed_paper_threshold": threshold,
         "test_threshold_search_performed": False,
-        "test_used_for_selection": False,
         "test": test,
     })
     return test
@@ -132,13 +139,15 @@ def main() -> None:
             "dataset": args.dataset,
             "seed": args.seed,
             "run_dir": str(run_dir),
-            "required_training_record": str(run_dir / "locked_validation_winner.json"),
-            "threshold_source": "validation only",
+            "required_fixed_checkpoint_record": str(run_dir / "locked_validation_winner.json"),
+            "checkpoint_source": "fixed paper checkpoint recorded by train.py",
+            "threshold_source": "fixed paper threshold from config.py",
             "test_threshold_search_performed": False,
         }, indent=2, ensure_ascii=False))
         return
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
+    # Legacy record filename retained to preserve the existing artifact contract.
     for required in (run_dir / "training_result.json", run_dir / "locked_validation_winner.json"):
         if not required.is_file():
             raise FileNotFoundError(f"Run train.py first; missing: {required}")

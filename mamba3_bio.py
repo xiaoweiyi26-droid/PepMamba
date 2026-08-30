@@ -1,6 +1,6 @@
 # Copyright (c) 2024-2026, Tri Dao, Albert Gu.
 # Bio-adapted Mamba3: simplified for training, following BioMamba2Block design philosophy.
-# The explicit B/C normalization and bias path avoids fused-kernel state inconsistencies.
+# FIXED: Forced explicit path for B/C norm and bias to prevent Triton kernel fusion bypass and state pollution.
 
 import math
 import os
@@ -30,7 +30,7 @@ from mamba_ssm.ops.triton.ssd_combined import mamba_chunk_scan_combined
 class BioMamba3Block(nn.Module):
     """
     Bio-adapted Mamba3 block, following BioMamba2Block design philosophy.
-
+    
     Differences vs original Mamba3:
     - No RoPE / rotary embeddings (removed angle_dt logic)
     - No trap gate
@@ -65,15 +65,15 @@ class BioMamba3Block(nn.Module):
         conv_bias=True,
         dropout=0.0,
         chunk_size=64,
-        use_mem_eff_path=True, # Retained for API compatibility; execution uses the explicit path.
+        use_mem_eff_path=True, # Kept for signature compatibility, but forcefully ignored
         # Output projection
         norm_before_gate=False,
-        # Retained for API compatibility.
+        # Absorb kwarg
         layer_idx=None,
         device=None,
         dtype=None,
     ):
-        del layer_idx
+        del layer_idx  
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
 
@@ -184,7 +184,7 @@ class BioMamba3Block(nn.Module):
             else None
         )
 
-        # Use the non-fused path to preserve B/C normalization and bias semantics.
+        # ALWAYS use the non-fused path to preserve Mamba3 architectural integrity (B/C norms & biases)
         z, xBC, dd_dt = torch.split(
             zxbcdt,
             [self.d_inner, self.d_inner + 2 * self.ngroups * self.d_state, self.nheads],
@@ -214,17 +214,17 @@ class BioMamba3Block(nn.Module):
         C = rearrange(C, "b l (g n) -> b l g n", g=self.ngroups)
         B = self.B_norm(B)
         C = self.C_norm(C)
-
+        
         # Add B/C biases: kernel broadcasts G -> H internally
-        B = B + self.B_bias
-        C = C + self.C_bias
+        B = B + self.B_bias  
+        C = C + self.C_bias  
 
         y = mamba_chunk_scan_combined(
             rearrange(x, "b l (h p) -> b l h p", p=self.headdim),
             dt,
             A,
-            B,
-            C,
+            B,  
+            C,  
             chunk_size=self.chunk_size,
             D=self.D,
             z=None,

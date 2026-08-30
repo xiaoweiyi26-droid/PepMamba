@@ -250,21 +250,11 @@ def collect_scores(model, loader, criterion, device):
 
 def evaluate_validation(model, loader, criterion, device, args):
     labels, scores, loss = collect_scores(model, loader, criterion, device)
-    scan, selected = scan_thresholds(
-        labels, scores, args.threshold_min, args.threshold_max, args.threshold_step
-    )
-    if getattr(args, "unified_selection", False):
-        selected = max(scan, key=lambda row: row["mcc"])
     fixed_threshold = getattr(args, "fixed_validation_threshold", None)
-    if fixed_threshold is not None:
-        if not args.threshold_min <= fixed_threshold <= args.threshold_max:
-            raise ValueError(
-                f"Fixed validation threshold outside scan range: {fixed_threshold}"
-            )
-        selected = {
-            "threshold": float(fixed_threshold),
-            **confusion_metrics(labels, scores, float(fixed_threshold)),
-        }
+    if fixed_threshold is None:
+        raise RuntimeError("Fixed paper threshold is required")
+    selected = {"threshold": float(fixed_threshold), **confusion_metrics(labels, scores, float(fixed_threshold))}
+    scan = [selected]
     metrics = {
         "loss": loss, "auc": float(roc_auc_score(labels, scores)),
         "auprc": float(average_precision_score(labels, scores)),
@@ -333,6 +323,8 @@ def write_aggregate_tables(output_dir, results):
 
 
 def train_trial(config, output_dir, args, modules, environment):
+    args.fixed_validation_threshold = float(config["threshold"])
+    args.fixed_checkpoint_epoch = int(config["best_epoch"])
     train_module, dataloaders, models = modules
     trial_dir = output_dir / config["trial_id"]
     trial_dir.mkdir(parents=True, exist_ok=False)
@@ -365,7 +357,7 @@ def train_trial(config, output_dir, args, modules, environment):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=15, T_mult=1, eta_min=1e-7
     )
-    best = None; start = time.time()
+    fixed = None; start = time.time()
     checkpoint = trial_dir / "best_validation_checkpoint.pth"
     for epoch in range(1, args.epochs + 1):
         model.train(); loss_sum = 0.0; batches = 0
@@ -383,21 +375,13 @@ def train_trial(config, output_dir, args, modules, environment):
                      "learning_rate": optimizer.param_groups[0]["lr"], **validation}
         append_jsonl(trial_dir / "train_log.jsonl", epoch_row)
         print(f"[{config['trial_id']}] " + json.dumps(epoch_row), flush=True)
-        if getattr(args, "unified_selection", False):
-            proposal = (validation["auc"], validation["auprc"])
-            incumbent = None if best is None else (
-                best["validation"]["auc"], best["validation"]["auprc"]
-            )
-        else:
-            proposal = (validation["auc"], validation["auprc"], validation["mcc"], validation["composite"])
-            incumbent = None if best is None else (
-                best["validation"]["auc"], best["validation"]["auprc"], best["validation"]["mcc"], best["validation"]["composite"]
-            )
-        if incumbent is None or proposal > incumbent:
-            best = {"epoch": epoch, "validation": validation}
+        if epoch == args.fixed_checkpoint_epoch:
+            fixed = {"epoch": epoch, "validation": validation}
             state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
             torch.save(state, checkpoint)
-            write_json(trial_dir / "best_validation_epoch.json", best)
+            write_json(trial_dir / "fixed_paper_epoch.json", fixed)
+    if fixed is None:
+        raise RuntimeError(f"Fixed paper epoch {args.fixed_checkpoint_epoch} was not reached")
     model.load_state_dict(torch.load(checkpoint, map_location="cpu"))
     val_labels, val_scores, threshold_scan, validation = evaluate_validation(
         model, val_loader, criterion, device, args
@@ -405,13 +389,7 @@ def train_trial(config, output_dir, args, modules, environment):
     pd.DataFrame(threshold_scan).to_csv(trial_dir / "validation_threshold_scan.csv", index=False)
     save_predictions(trial_dir / "validation_predictions", val_labels, val_scores)
     write_json(trial_dir / "validation_metrics.json", validation)
-    threshold_rule = (
-        "maximum validation MCC; lowest threshold on an exact tie"
-        if getattr(args, "unified_selection", False) else
-        ("fixed validation-constrained operating point from config.py"
-         if getattr(args, "fixed_validation_threshold", None) is not None
-         else "validation MCC, then F1, then AUPRC")
-    )
+    threshold_rule = "fixed paper threshold from config.py"
     write_json(trial_dir / "selected_validation_threshold.json", {
         "threshold": validation["threshold"], "selection_metric": threshold_rule,
         "scan_file": str(trial_dir / "validation_threshold_scan.csv"),
@@ -420,9 +398,9 @@ def train_trial(config, output_dir, args, modules, environment):
         "trial_id": config["trial_id"], "seed": args.seed, "dataset": args.dataset,
         "single_model": True, "architecture": "unchanged project PepMamba/BioMamba",
         "config": config, "fixed_model_config": MODEL_FIXED,
-        "class_weight": class_weight_info, "best_epoch": best["epoch"],
-        "checkpoint_selection": "validation AUROC, then validation AUPRC" if getattr(args, "unified_selection", False) else "validation AUROC, then AUPRC, MCC, and composite",
-        "threshold_selection": threshold_rule,
+        "class_weight": class_weight_info, "best_epoch": fixed["epoch"],
+        "checkpoint_selection": "fixed paper epoch from config.py",
+        "threshold_selection": "fixed paper threshold from config.py",
         "validation": validation, "checkpoint": str(checkpoint),
         "checkpoint_sha256": sha256(checkpoint),
         "test": {"status": "not_evaluated"}, "elapsed_seconds": time.time() - start,
@@ -437,7 +415,7 @@ def evaluate_locked_test(winner, output_dir, args, modules):
     train_module, dataloaders, models = modules
     lock = {
         "locked_at": utc_now(), "selection_data": "interpep_val.csv only",
-        "selection_rule": winner["checkpoint_selection"] + "; " + winner["threshold_selection"],
+        "selection_rule": "fixed paper epoch and fixed paper threshold from config.py",
         "trial_id": winner["trial_id"], "checkpoint": winner["checkpoint"],
         "checkpoint_sha256": winner["checkpoint_sha256"], "best_epoch": winner["best_epoch"],
         "validation": winner["validation"],
@@ -470,7 +448,7 @@ def evaluate_locked_test(winner, output_dir, args, modules):
         focal_alpha=config["focal_alpha"], focal_gamma=config["focal_gamma"],
     )
     labels, scores, loss = collect_scores(model, test_loader, criterion, device)
-    threshold = float(winner["validation"]["threshold"])
+    threshold = float(config["threshold"])
     test = {
         "status": "evaluated_once_after_validation_lock", "loss": loss,
         "auc": float(roc_auc_score(labels, scores)),
@@ -667,12 +645,19 @@ def main():
     if not (0 < args.threshold_min < args.threshold_max < 1) or args.threshold_step <= 0:
         raise ValueError("Invalid threshold grid")
     data_audit = audit_data(args.dataset)
-    if args.config_json:
-        config = json.loads(args.config_json.read_text(encoding="utf-8"))
-        config["trial_id"] = "trial_000_rerun"
-        configs = [config]
-    else:
-        configs = sample_configs(args.trials, args.seed)
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from config import BEST_PARAMS
+    params = BEST_PARAMS[args.dataset]
+    configs = [{
+        "trial_id": "paper_fixed", "lr": params["lr"],
+        "dropout": params["dropout"], "focal_alpha": params["alpha"],
+        "focal_gamma": params["gamma"], "ce_weight": params["ce_weight"],
+        "weight_decay": params["weight_decay"], "batch_size": params["batch_size"],
+        "class_weight_power": params["class_weight_power"],
+        "max_pos_weight": params["max_pos_weight"], "n_layers": params["n_layers"],
+        "best_epoch": params["best_epoch"], "threshold": params["threshold"],
+    }]
     for config in configs:
         verify_config(config)
     if args.dry_run:
@@ -707,9 +692,9 @@ def main():
         "training_data": str(DATA_DIR / "interpep_train.csv"),
         "selection_data": str(DATA_DIR / "interpep_val.csv"),
         "test_data": str(DATA_DIR / "interpep_test.csv"),
-        "checkpoint_and_trial_selection": "validation AUROC, AUPRC, MCC, then composite",
+        "checkpoint_and_trial_selection": "fixed paper epoch from config.py",
         "validation_composite": "0.50*AUROC + 0.30*AUPRC + 0.20*MCC",
-        "threshold_selection": f"validation MCC, then F1, then AUPRC over [{args.threshold_min}, {args.threshold_max}] step {args.threshold_step}",
+        "threshold_selection": "fixed paper threshold from config.py",
         "test_policy": "only locked validation winner evaluated once; no test threshold scan",
         "non_winner_test_metrics": "explicit not_evaluated records are saved to prevent test leakage",
         "paper_friendly_summary": "presentation only; never a selection criterion",
@@ -726,7 +711,7 @@ def main():
             "event": "validation_trial_completed", "at": utc_now(), "trial_id": result["trial_id"]
         })
     ranked_auc, ranked_composite = write_aggregate_tables(output_dir, results)
-    winner = evaluate_locked_test(ranked_auc[0], output_dir, args, (train_module, dataloaders, models))
+    winner = evaluate_locked_test(results[0], output_dir, args, (train_module, dataloaders, models))
     for index, item in enumerate(results):
         if item["trial_id"] == winner["trial_id"]:
             results[index] = winner
@@ -735,7 +720,7 @@ def main():
     consistency_report(results, winner, output_dir, args)
     write_manuscript_outputs(winner, ranked_auc, ranked_composite, presentation, output_dir)
     append_jsonl(output_dir / "protocol_events.jsonl", {"event": "run_completed", "at": utc_now()})
-    print(f"Completed strict InterPep AUC tuning: {output_dir}", flush=True)
+    print(f"Completed fixed InterPep paper reproduction: {output_dir}", flush=True)
 
 
 if __name__ == "__main__":

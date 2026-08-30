@@ -32,7 +32,7 @@ def embed(sequences: list[str], model, alphabet, device: torch.device) -> dict[s
         if len(sequence) > 1022:
             raise ValueError(
                 f"Sequence length {len(sequence)} exceeds the ESM-2 single-window limit; "
-                "use the windowed UMPPI preparation script instead."
+                "use the windowed CPPIF external benchmark preparation script instead."
             )
         _, strings, tokens = converter([("sequence", sequence)])
         with torch.inference_mode():
