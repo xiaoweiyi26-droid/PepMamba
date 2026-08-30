@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Protocol-locked CPPIF external benchmark run selected on validation."""
+"""Protocol-locked PepMamba-679 evaluation on the CPPIF external benchmark."""
 from __future__ import annotations
 import hashlib,json,math,os,platform,random,sys
 from collections import defaultdict
@@ -14,10 +14,33 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import average_precision_score,matthews_corrcoef,roc_auc_score
 from torch.utils.data import DataLoader
-ROOT=Path(__file__).resolve().parents[1]; sys.path[:0]=[str(ROOT),str(ROOT/'scripts')]
-from config import BEST_PARAMS,MODEL_CONFIG
+ROOT=Path(__file__).resolve().parents[2]; sys.path[:0]=[str(ROOT),str(ROOT/'scripts'),str(Path(__file__).resolve().parent)]
 from models import PepMamba
-from cppif_dataset import CPPIFProteinSiteDataset,cppif_collate
+from cppif_dataset import CPPIF679ProteinSiteDataset,cppif_collate
+
+CPPIF679_PARAMS = {
+    "seed": 42,
+    "epochs": 35,
+    "learning_rate": 0.00025,
+    "dropout": 0.23,
+    "focal_alpha": 0.55,
+    "focal_gamma": 2.8,
+    "ce_weight": 0.48,
+    "weight_decay": 0.003,
+    "class_weight_power": 0.45,
+    "max_pos_weight": 4.0,
+    "batch_size": 16,
+    "effective_batch_size": 16,
+    "n_layers": 4,
+    "d_model": 160,
+    "cross_attention_heads": 8,
+    "d_k": 32,
+    "d_v": 32,
+    "d_inner_multiplier": 2,
+    "scheduler_t0": 10,
+    "grad_clip": 1.0,
+    "parameter_source": "original CPPIF trial_003 locked configuration",
+}
 
 def seed_all(seed):
  random.seed(seed); np.random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
@@ -58,9 +81,34 @@ def binary(y,p,t):
  precision=tp/max(tp+fp,1); recall=tp/max(tp+fn,1); specificity=tn/max(tn+fp,1); f1=2*precision*recall/max(precision+recall,1e-15)
  mcc=float(matthews_corrcoef(y,pred)) if len(np.unique(y))==2 else float('nan')
  return {'mcc':mcc,'f1':f1,'precision':precision,'recall':recall,'sensitivity':recall,'specificity':specificity,'tp':tp,'tn':tn,'fp':fp,'fn':fn}
-def scan(y,p):
- rows=[{'threshold':float(t),**binary(y,p,float(t))} for t in np.round(np.arange(.05,.9501,.005),3)]
- return rows,max(rows,key=lambda r:(r['mcc'],r['f1'],-r['threshold']))
+def scan(records,y,p):
+ rows=[]
+ for t in np.round(np.arange(.05,.9501,.005),3):
+  record_mcc=[binary(r['y'],r['p'],float(t))['mcc'] for r in records if len(np.unique(r['y']))==2]
+  pooled=binary(y,p,float(t))
+  rows.append({'threshold':float(t),'mean_record_mcc':float(np.mean(record_mcc)),'n_valid_records':len(record_mcc),**pooled})
+ return rows,max(rows,key=lambda r:(r['mean_record_mcc'],r['mcc'],r['f1'],-r['threshold']))
+
+def validation_summary(y,p,records,t):
+ valid=[r for r in records if len(np.unique(r['y']))==2]
+ aucs=[roc_auc_score(r['y'],r['p']) for r in valid]
+ mccs=[binary(r['y'],r['p'],t)['mcc'] for r in valid]
+ return {'mean_record_auroc':float(np.mean(aucs)),'mean_record_mcc':float(np.mean(mccs)),'n_valid_records':len(valid),'pooled_auroc':float(roc_auc_score(y,p)),'pooled_auprc':float(average_precision_score(y,p)),**binary(y,p,t)}
+
+def make_batches(lengths,nominal,n_layers,d_model,seed,effective_target):
+ budget=48_000_000*(3*128)/(n_layers*d_model); order=np.argsort(lengths); batches=[]; i=0
+ while i<len(order):
+  length=max(int(lengths[order[i]]),1); capacity=max(1,min(nominal,int(budget/(length*length)))); batch=order[i:i+capacity].tolist(); batches.append(batch); i+=len(batch)
+ random.Random(seed).shuffle(batches); denominators=[0]*len(batches); step_after=[False]*len(batches); group=[]; count=0
+ for index,batch in enumerate(batches):
+  if group and count+len(batch)>effective_target:
+   for j in group: denominators[j]=count
+   step_after[group[-1]]=True; group=[]; count=0
+  group.append(index); count+=len(batch)
+ if group:
+  for j in group: denominators[j]=count
+  step_after[group[-1]]=True
+ return batches,denominators,step_after
 def collect(model,loader,device):
  model.eval(); ys=[]; ps=[]; records=[]
  with torch.no_grad():
@@ -108,44 +156,44 @@ def env_info(): return {'python':sys.version,'platform':platform.platform(),'tor
 
 def main(seed=42,epochs=35):
  if seed!=42 or epochs!=35: raise ValueError('Formal reference protocol is locked to seed=42 and epochs=35')
- seed_all(seed); device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'); stamp=datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S'); out=ROOT/'runs'/'cppif'/f'reference_seed42_{stamp}'; out.mkdir(parents=True,exist_ok=False); log=Logger(out/'train.log')
+ seed_all(seed); device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'); stamp=datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S'); out=ROOT/'runs'/'cppif_679'/f'reference_seed42_{stamp}'; out.mkdir(parents=True,exist_ok=False); log=Logger(out/'train.log')
  data=ROOT/'data/cppif'; emb=ROOT/'embeddings/cppif_esm2_650m'
  # Test is intentionally not read or instantiated before validation lock.
- train_ds=CPPIFProteinSiteDataset(data/'train.csv',ROOT,emb); val_ds=CPPIFProteinSiteDataset(data/'validation.csv',ROOT,emb)
+ train_ds=CPPIF679ProteinSiteDataset(data/'train.csv',ROOT,emb); val_ds=CPPIF679ProteinSiteDataset(data/'validation.csv',ROOT,emb)
  if (len(train_ds),len(val_ds))!=(4726,539): raise RuntimeError('locked train/validation counts changed')
- p=BEST_PARAMS['bitenet']; physical_batch=2; accumulation=12
- config={'experiment':'first CPPIF external benchmark formal reference run','seed':seed,'epochs':epochs,'split_source':'clu_thre_0.0001/new_protein_balanced fold 0; train=group0-group1, validation=group1, test=group2','train_records':4726,'validation_records':539,'expected_test_records':1310,'learning_rate':p['lr'],'dropout':p['dropout'],'focal_alpha':p['alpha'],'focal_gamma':p['gamma'],'ce_weight':p['ce_weight'],'weight_decay':p['weight_decay'],'configured_effective_batch_size':p['batch_size'],'physical_batch_size':physical_batch,'gradient_accumulation_steps':accumulation,'class_weight_power':p['class_weight_power'],'max_pos_weight':p['max_pos_weight'],'grad_clip':p['grad_clip'],'n_layers':p['n_layers'],'model_config':MODEL_CONFIG,'scheduler':{'name':'CosineAnnealingWarmRestarts','T_0':p['scheduler_t0'],'eta_min':1e-7},'checkpoint_selection':['validation_AUROC','validation_AUPRC','validation_MCC'],'threshold':{'split':'validation','minimum':.05,'maximum':.95,'step':.005,'selection':['MCC','F1','lower_threshold']},'test_used_for_selection':False,'test_threshold_search_performed':False,'sequence_truncation':False,'silent_clipping':False,'environment':env_info()}
+ p=CPPIF679_PARAMS
+ config={**p,'experiment':'PepMamba-679 CPPIF external benchmark reference run','split_source':'clu_thre_0.0001/new_protein_balanced fold 0; train=group0-group1, validation=group1, test=group2','train_records':4726,'validation_records':539,'expected_test_records':1310,'scheduler':{'name':'CosineAnnealingWarmRestarts','T_0':p['scheduler_t0'],'eta_min':1e-7},'checkpoint_selection':['validation mean-record AUROC','validation mean-record MCC','validation pooled AUPRC'],'threshold':{'split':'validation','minimum':.05,'maximum':.95,'step':.005,'selection':['mean-record MCC','pooled MCC','pooled F1','lower threshold']},'test_used_for_selection':False,'test_threshold_search_performed':False,'sequence_truncation':True,'protein_max_length':679,'peptide_max_length':50,'protein_truncation':'retain first 679 residues, labels, and ESM rows','silent_clipping':False,'environment':env_info()}
  write_json(out/'config.json',config); log('CONFIG_LOCKED '+json.dumps(config,default=jd))
- txt=''.join(train_ds.frame.protein_residue_label.astype(str)); positives=txt.count('1'); negatives=txt.count('0'); pos_weight=min((negatives/positives)**p['class_weight_power'],p['max_pos_weight']); weights=torch.tensor([1.,pos_weight],device=device)
- model=PepMamba(n_layers=p['n_layers'],d_model=MODEL_CONFIG['d_model'],n_head=MODEL_CONFIG['n_head'],d_k=MODEL_CONFIG['d_k'],d_v=MODEL_CONFIG['d_v'],d_inner=MODEL_CONFIG['d_inner'],dropout=p['dropout']).to(device)
- loss_fn=HybridLoss(p['ce_weight'],weights,p['alpha'],p['gamma']); optimizer=torch.optim.AdamW(model.parameters(),lr=p['lr'],weight_decay=p['weight_decay']); scheduler=torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=p['scheduler_t0'],eta_min=1e-7)
- val_loader=DataLoader(val_ds,batch_size=1,shuffle=False,num_workers=0,collate_fn=cppif_collate,pin_memory=True); history=[]; best_key=None; checkpoint=out/'best_validation_checkpoint.pth'
+ txt=''.join(train_ds.frame.protein_residue_label.astype(str).str.slice(0, CPPIF679ProteinSiteDataset.PROTEIN_LIMIT)); positives=txt.count('1'); negatives=txt.count('0'); pos_weight=min((negatives/positives)**p['class_weight_power'],p['max_pos_weight']); weights=torch.tensor([1.,pos_weight],device=device)
+ model=PepMamba(n_layers=p['n_layers'],d_model=p['d_model'],n_head=p['cross_attention_heads'],d_k=p['d_k'],d_v=p['d_v'],d_inner=p['d_model']*p['d_inner_multiplier'],dropout=p['dropout']).to(device)
+ loss_fn=HybridLoss(p['ce_weight'],weights,p['focal_alpha'],p['focal_gamma']); optimizer=torch.optim.AdamW(model.parameters(),lr=p['learning_rate'],weight_decay=p['weight_decay']); scheduler=torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=p['scheduler_t0'],eta_min=1e-7)
+ val_loader=DataLoader(val_ds,batch_size=1,shuffle=False,num_workers=0,collate_fn=cppif_collate,pin_memory=True); history=[]; best_key=None; checkpoint=out/'best_validation_checkpoint.pth'; lengths=np.minimum(train_ds.frame.prot_seq.str.len().to_numpy(),CPPIF679ProteinSiteDataset.PROTEIN_LIMIT)
  for epoch in range(1,epochs+1):
-  gen=torch.Generator().manual_seed(seed+epoch); loader=DataLoader(train_ds,batch_size=physical_batch,shuffle=True,generator=gen,num_workers=0,collate_fn=cppif_collate,pin_memory=True)
-  model.train(); optimizer.zero_grad(set_to_none=True); losses=[]; tys=[]; tps=[]; acc=0
+  batches,denominators,step_after=make_batches(lengths,p['batch_size'],p['n_layers'],p['d_model'],seed+epoch,p['effective_batch_size']); loader=DataLoader(train_ds,batch_sampler=batches,num_workers=0,collate_fn=cppif_collate,pin_memory=True)
+  model.train(); optimizer.zero_grad(set_to_none=True); losses=[]
   for step,b in enumerate(loader,1):
    protein=b['protein'].to(device,non_blocking=True); peptide=b['peptide'].to(device,non_blocking=True); targets=b['labels'].to(device); mask=b['protein_pad_mask'].to(device); logits,_=model(peptide,protein,class_mask=mask); loss=loss_fn(logits,targets)
    if not torch.isfinite(loss): raise RuntimeError(f'non-finite loss epoch={epoch} step={step}')
-   (loss/accumulation).backward(); losses.append(float(loss.detach())); valid=~mask; tys.append(targets[valid].detach().cpu().numpy()); tps.append(F.softmax(logits,dim=-1)[...,1][valid].detach().cpu().numpy()); acc+=1
-   if acc==accumulation or step==len(loader): torch.nn.utils.clip_grad_norm_(model.parameters(),p['grad_clip']); optimizer.step(); optimizer.zero_grad(set_to_none=True); acc=0
-  vy,vp,vrecords=collect(model,val_loader,device); _,chosen=scan(vy,vp); ty=np.concatenate(tys); tp=np.concatenate(tps)
-  row={'epoch':epoch,'learning_rate':optimizer.param_groups[0]['lr'],'train_loss':float(np.mean(losses)),'train_AUROC':float(roc_auc_score(ty,tp)),'train_AUPRC':float(average_precision_score(ty,tp)),'validation_AUROC':float(roc_auc_score(vy,vp)),'validation_AUPRC':float(average_precision_score(vy,vp)),'validation_MCC':chosen['mcc'],'validation_epoch_threshold':chosen['threshold']}; history.append(row); key=(row['validation_AUROC'],row['validation_AUPRC'],row['validation_MCC'])
+   count=len(b['record_ids']); (loss*count/denominators[step-1]).backward(); losses.append(float(loss.detach()))
+   if step_after[step-1]: torch.nn.utils.clip_grad_norm_(model.parameters(),p['grad_clip']); optimizer.step(); optimizer.zero_grad(set_to_none=True)
+  vy,vp,vrecords=collect(model,val_loader,device); _,chosen=scan(vrecords,vy,vp); summary=validation_summary(vy,vp,vrecords,chosen['threshold'])
+  row={'epoch':epoch,'learning_rate':optimizer.param_groups[0]['lr'],'train_loss':float(np.mean(losses)),**summary,'validation_epoch_threshold':chosen['threshold']}; history.append(row); key=(summary['mean_record_auroc'],summary['mean_record_mcc'],summary['pooled_auprc'])
   if best_key is None or key>best_key: best_key=key; torch.save({'model_state_dict':model.state_dict(),'best_epoch':epoch,'selection_key':key,'config':config},checkpoint)
-  write_csv(out/'training_history.csv',history); log(f"epoch {epoch:02d}/{epochs} train_loss={row['train_loss']:.6f} val_auc={row['validation_AUROC']:.6f} val_auprc={row['validation_AUPRC']:.6f} val_mcc={row['validation_MCC']:.6f} val_threshold={row['validation_epoch_threshold']:.3f}"); scheduler.step(epoch)
+  write_csv(out/'training_history.csv',history); log(f"epoch {epoch:02d}/{epochs} train_loss={row['train_loss']:.6f} mean_record_auc={row['mean_record_auroc']:.6f} mean_record_mcc={row['mean_record_mcc']:.6f} pooled_auprc={row['pooled_auprc']:.6f} val_threshold={row['validation_epoch_threshold']:.3f}"); scheduler.step(epoch)
  state=torch.load(checkpoint,map_location=device,weights_only=False); model.load_state_dict(state['model_state_dict']); model.eval(); digest=sha256(checkpoint); (out/'checkpoint_sha256.txt').write_text(digest+'\n')
- vy,vp,vrecords=collect(model,val_loader,device); rows,chosen=scan(vy,vp); write_csv(out/'validation_threshold_scan.csv',rows); save_predictions(out/'validation_predictions.npz',vy,vp,vrecords)
- lock={'best_epoch':state['best_epoch'],'validation_AUROC':float(roc_auc_score(vy,vp)),'validation_AUPRC':float(average_precision_score(vy,vp)),'validation_MCC':chosen['mcc'],'selected_threshold':chosen['threshold'],'selection':'maximum validation MCC; tie F1; then lower threshold','checkpoint_sha256':digest,'test_loaded_before_lock':False,'locked_at':datetime.now(timezone.utc).isoformat()}; write_json(out/'selected_validation_threshold.json',lock); log('VALIDATION_LOCKED '+json.dumps(lock))
+ vy,vp,vrecords=collect(model,val_loader,device); rows,chosen=scan(vrecords,vy,vp); validation=validation_summary(vy,vp,vrecords,chosen['threshold']); write_csv(out/'validation_threshold_scan.csv',rows); save_predictions(out/'validation_predictions.npz',vy,vp,vrecords)
+ lock={'best_epoch':state['best_epoch'],**validation,'selected_threshold':chosen['threshold'],'selection':'maximum validation mean-record MCC; ties pooled MCC, pooled F1, then lower threshold','checkpoint_sha256':digest,'test_loaded_before_lock':False,'test_used_for_selection':False,'test_threshold_search_performed':False,'locked_at':datetime.now(timezone.utc).isoformat()}; write_json(out/'selected_validation_threshold.json',lock); log('VALIDATION_LOCKED '+json.dumps(lock))
  # Test access starts only after the durable checkpoint/threshold lock above.
- test_ds=CPPIFProteinSiteDataset(data/'test.csv',ROOT,emb)
+ test_ds=CPPIF679ProteinSiteDataset(data/'test.csv',ROOT,emb)
  if len(test_ds)!=1310: raise RuntimeError('locked test count changed')
  train=train_ds.frame.copy(); val=val_ds.frame.copy(); test=test_ds.frame.copy(); stats=split_stats(train,val,test); manifest=[]
  for split,frame in [('train',train),('validation',val),('test',test)]:
-  for _,r in frame.iterrows(): manifest.append({'split':split,'record_id':r.record_id,'dataset_index':r.dataset_index,'protein_sequence_hash':r.protein_sequence_hash,'peptide_sequence_hash':r.peptide_sequence_hash,'protein_length':len(r.prot_seq),'peptide_length':len(r.pep_seq)})
+  for _,r in frame.iterrows(): manifest.append({'split':split,'record_id':r.record_id,'dataset_index':r.dataset_index,'protein_sequence_hash':r.protein_sequence_hash,'peptide_sequence_hash':r.peptide_sequence_hash,'protein_length':min(len(r.prot_seq), CPPIF679ProteinSiteDataset.PROTEIN_LIMIT),'original_protein_length':len(r.prot_seq),'peptide_length':len(r.pep_seq)})
  write_csv(out/'split_manifest.csv',manifest); test_loader=DataLoader(test_ds,batch_size=1,shuffle=False,num_workers=0,collate_fn=cppif_collate,pin_memory=True); test_y,test_p,test_records=collect(model,test_loader,device); t=chosen['threshold']; save_predictions(out/'test_predictions.npz',test_y,test_p,test_records)
  pm={'auroc':float(roc_auc_score(test_y,test_p)),'auprc':float(average_precision_score(test_y,test_p)),'threshold':t,**binary(test_y,test_p,t)}; recs,macro,unique=record_metrics(test_records,test,t); write_csv(out/'per_record_metrics.csv',recs); write_json(out/'pooled_test_metrics.json',pm); write_json(out/'macro_test_metrics.json',macro); write_json(out/'unique_protein_metrics.json',unique)
  sh=partner_shuffle(model,test_ds,t,device,[42,123,3407,7169,8873],200); write_csv(out/'partner_shuffle_analysis.csv',sh); sa=np.asarray([r['shuffled_peptide_mean_AUROC'] for r in sh]); sm=np.asarray([r['shuffled_peptide_mean_MCC'] for r in sh]); (out/'partner_shuffle_report.md').write_text(f"# Partner-shuffle analysis\n\n- Frozen checkpoint: `{digest}`\n- Selection role: none\n- Records sampled: {sh[0]['n_records']}\n- Correct peptide AUROC/MCC: {sh[0]['correct_peptide_mean_AUROC']:.6f} / {sh[0]['correct_peptide_mean_MCC']:.6f}\n- Shuffled peptide AUROC: {sa.mean():.6f} ± {sa.std():.6f}\n- Shuffled peptide MCC: {sm.mean():.6f} ± {sm.std():.6f}\n")
- ef1=2*pm['precision']*pm['recall']/max(pm['precision']+pm['recall'],1e-15); integrity={'label_alignment_pass':'100%','embedding_alignment_pass':'100%','sequence_truncation':False,'silent_clipping':False,**stats,'test_used_for_selection':False,'test_threshold_search_performed':False,'f1_formula_pass':abs(ef1-pm['f1'])<1e-12,'mcc_confusion_recompute_pass':abs(binary(test_y,test_p,t)['mcc']-pm['mcc'])<1e-12}
- report=f"# FINAL CPPIF external benchmark report\n\n## Locked protocol\n\n- Seed / epochs: {seed} / {epochs}\n- Best epoch: {state['best_epoch']}\n- Checkpoint SHA-256: `{digest}`\n- Validation AUROC/AUPRC/MCC: {lock['validation_AUROC']:.6f} / {lock['validation_AUPRC']:.6f} / {lock['validation_MCC']:.6f}\n- Validation-selected threshold: {t:.3f}\n- Test used for selection: false\n- Test threshold search performed: false\n\n## CPPIF external benchmark macro-record test metrics\n\n- Mean AUROC / MCC: {macro['mean_record_AUROC']:.6f} / {macro['mean_record_MCC']:.6f}\n- Median AUROC / MCC: {macro['median_record_AUROC']:.6f} / {macro['median_record_MCC']:.6f}\n- Std AUROC / MCC: {macro['std_record_AUROC']:.6f} / {macro['std_record_MCC']:.6f}\n- Valid records: {macro['n_valid_records']}\n\n## Pooled test metrics\n\n```json\n{json.dumps(pm,indent=2)}\n```\n\n## Unique-protein secondary metrics\n\n```json\n{json.dumps(unique,indent=2)}\n```\n\n## Integrity\n\n```json\n{json.dumps(integrity,indent=2)}\n```\n"; (out/'FINAL_CPPIF_REPORT.md').write_text(report); log(f'COMPLETE output_dir={out}')
+ ef1=2*pm['precision']*pm['recall']/max(pm['precision']+pm['recall'],1e-15); integrity={'label_alignment_pass':'100%','embedding_alignment_pass':'100%','sequence_truncation':True,'protein_max_length':679,'protein_truncation':'retain first 679 residues, labels, and ESM rows','silent_clipping':False,**stats,'test_used_for_selection':False,'test_threshold_search_performed':False,'f1_formula_pass':abs(ef1-pm['f1'])<1e-12,'mcc_confusion_recompute_pass':abs(binary(test_y,test_p,t)['mcc']-pm['mcc'])<1e-12}
+ report=f"# FINAL PepMamba-679 CPPIF external benchmark report\n\n## Locked protocol\n\n- Seed / epochs: {seed} / {epochs}\n- Best epoch: {state['best_epoch']}\n- Checkpoint SHA-256: `{digest}`\n- Validation mean-record AUROC/MCC and pooled AUPRC: {lock['mean_record_auroc']:.6f} / {lock['mean_record_mcc']:.6f} / {lock['pooled_auprc']:.6f}\n- Validation-selected threshold: {t:.3f}\n- Test used for selection: false\n- Test threshold search performed: false\n\n## CPPIF external benchmark macro-record test metrics\n\n- Mean AUROC / MCC: {macro['mean_record_AUROC']:.6f} / {macro['mean_record_MCC']:.6f}\n- Median AUROC / MCC: {macro['median_record_AUROC']:.6f} / {macro['median_record_MCC']:.6f}\n- Std AUROC / MCC: {macro['std_record_AUROC']:.6f} / {macro['std_record_MCC']:.6f}\n- Valid records: {macro['n_valid_records']}\n\n## Pooled test metrics\n\n```json\n{json.dumps(pm,indent=2)}\n```\n\n## Unique-protein secondary metrics\n\n```json\n{json.dumps(unique,indent=2)}\n```\n\n## Integrity\n\n```json\n{json.dumps(integrity,indent=2)}\n```\n"; (out/'FINAL_CPPIF_679_REPORT.md').write_text(report); log(f'COMPLETE output_dir={out}')
  print(json.dumps({'output_dir':str(out),'best_epoch':state['best_epoch'],'threshold':t,'macro':macro,'pooled':pm,'unique_protein':unique,'integrity':integrity},indent=2))
 
 

@@ -1,6 +1,6 @@
 # PepMamba
 
-PepMamba predicts protein–peptide interaction sites using ESM-2 residue representations, bidirectional BioMamba3 blocks, and reciprocal cross-attention.
+Code for training and evaluating PepMamba on the benchmark datasets is provided in this repository.
 
 ## Architecture
 
@@ -33,7 +33,7 @@ Fixed train/validation/test CSV files are provided in `data/`. Protein and pepti
 python scripts/prepare_pair_esm2_embeddings.py --data-dir data --output-dir .
 ```
 
-The paper also reports an additional external evaluation on the CPPIF external benchmark. Its fixed splits are provided in `data/cppif/`, with ESM-2 preparation available in `scripts/prepare_cppif_esm2_embeddings.py`; it is separate from the four main benchmarks listed below.
+The paper also reports an additional external evaluation on the CPPIF external benchmark. Its fixed splits are provided in `data/cppif/`, with ESM-2 preparation available in `scripts/cppif/prepare_cppif_esm2_embeddings.py`; it is separate from the four main benchmarks listed below.
 
 ## Quick Start
 
