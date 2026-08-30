@@ -16,7 +16,7 @@ BEST_PARAMS = {
         "grad_clip": 1.0,
         "n_layers": 3,
         "epochs": 35,
-        "threshold": 0.6099999999999998,
+        "threshold": 0.610,
         "best_epoch": 27,
     },
     "interpep": {
@@ -48,7 +48,7 @@ BEST_PARAMS = {
         "n_layers": 2,
         "epochs": 35,
         "scheduler_t0": 15,
-        "threshold": 0.5750000000000004,
+        "threshold": 0.575,
         "best_epoch": 31,
     },
     "pepnn": {
@@ -64,7 +64,7 @@ BEST_PARAMS = {
         "n_layers": 2,
         "epochs": 35,
         "scheduler_t0": 15,
-        "threshold": 0.7000000000000004,
+        "threshold": 0.700,
         "best_epoch": 34,
     },
 }

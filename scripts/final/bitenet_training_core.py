@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Run BITENET pretrained-representation ablations.
-
-This runner compares whether the protein and peptide inputs use frozen ESM-2
-features or trainable amino-acid embeddings. It intentionally leaves the core
-PepMamba/BITENET model implementation unchanged.
-"""
+"""Shared utilities for fixed-paper BITENET training and evaluation."""
 
 import csv
 import gc
@@ -16,8 +11,6 @@ import pickle
 import random
 import time
 import zipfile
-import argparse
-from datetime import datetime, timezone
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -69,33 +62,6 @@ BASE_MODEL_CONFIG = {
     "d_v": 32,
     "d_inner": 256,
 }
-
-VARIANTS = [
-    {
-        "name": "learnable_learnable",
-        "label": "Learnable + Learnable",
-        "protein_esm": False,
-        "peptide_esm": False,
-    },
-    {
-        "name": "esm2_learnable",
-        "label": "ESM-2 + Learnable",
-        "protein_esm": True,
-        "peptide_esm": False,
-    },
-    {
-        "name": "learnable_esm2",
-        "label": "Learnable + ESM-2",
-        "protein_esm": False,
-        "peptide_esm": True,
-    },
-    {
-        "name": "esm2_esm2",
-        "label": "ESM-2 + ESM-2",
-        "protein_esm": True,
-        "peptide_esm": True,
-    },
-]
 
 
 def seed_everything(seed):
@@ -422,121 +388,6 @@ def write_table_csv(path, rows, headers):
         writer.writerows(rows)
 
 
-def flatten_result(result):
-    test = result["test"]
-    val = result["validation"]
-    return {
-        "variant": result["variant"],
-        "protein_repr": result["protein_repr"],
-        "peptide_repr": result["peptide_repr"],
-        "seed": result["seed"],
-        "best_epoch": result["best_epoch"],
-        "selected_threshold": val["threshold"],
-        "val_auc": val["auc"],
-        "val_auprc": val["auprc"],
-        "val_mcc": val["mcc"],
-        "test_auc": test["auc"],
-        "test_auprc": test["auprc"],
-        "sensitivity": test["sensitivity"],
-        "specificity": test["specificity"],
-        "precision": test["precision"],
-        "mcc": test["mcc"],
-        "f1": test["f1"],
-        "elapsed_sec": result["elapsed_sec"],
-    }
-
-
-def write_summary(run_dir, results):
-    if not results:
-        return
-    rows = [flatten_result(item) for item in results]
-    headers = list(rows[0].keys())
-    write_table_csv(run_dir / "ablation_pretrained_repr_all_results.csv", rows, headers)
-    sorted_auc = sorted(rows, key=lambda row: (row["test_auc"], row["mcc"]), reverse=True)
-    sorted_mcc = sorted(rows, key=lambda row: (row["mcc"], row["test_auc"]), reverse=True)
-    write_xlsx(
-        run_dir / "ablation_pretrained_repr_all_results.xlsx",
-        {
-            "all_results": [headers] + [[row[key] for key in headers] for row in rows],
-            "sort_test_auc": [headers] + [[row[key] for key in headers] for row in sorted_auc],
-            "sort_mcc": [headers] + [[row[key] for key in headers] for row in sorted_mcc],
-        },
-    )
-    full = next((row for row in rows if row["variant"] == "ESM-2 + ESM-2"), None)
-    no_pep = next((row for row in rows if row["variant"] == "ESM-2 + Learnable"), None)
-    no_prot = next((row for row in rows if row["variant"] == "Learnable + ESM-2"), None)
-    drops = []
-    if full is not None:
-        for row in rows:
-            if row is not full:
-                drops.append((row["variant"], full["test_auc"] - row["test_auc"], full["mcc"] - row["mcc"]))
-    largest = max(drops, key=lambda item: (item[1], item[2])) if drops else None
-    dual_best_auc = full is not None and sorted_auc[0]["variant"] == "ESM-2 + ESM-2"
-    dual_best_mcc = full is not None and sorted_mcc[0]["variant"] == "ESM-2 + ESM-2"
-    protein_contrib = None
-    peptide_contrib = None
-    if full is not None and no_prot is not None:
-        protein_contrib = (full["test_auc"] - no_prot["test_auc"], full["mcc"] - no_prot["mcc"])
-    if full is not None and no_pep is not None:
-        peptide_contrib = (full["test_auc"] - no_pep["test_auc"], full["mcc"] - no_pep["mcc"])
-    protein_bigger = None
-    if protein_contrib is not None and peptide_contrib is not None:
-        protein_bigger = protein_contrib > peptide_contrib
-
-    lines = [
-        "# BITENET Pretrained Representation Ablation",
-        "",
-        f"- Generated: {datetime.now(timezone.utc).isoformat()}",
-        f"- Seed: `{SEED}`",
-        "- Checkpoint selection: validation AUROC, tie-break by validation AUPRC.",
-        "- Threshold selection: validation MCC scan, then fixed on test.",
-        "",
-        "## Sorted by Test AUC",
-        "",
-        "| Rank | Variant | Test AUC | Test MCC | AUPRC | Sens | Spec | Precision | F1 | Threshold | Best epoch |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ]
-    for rank, row in enumerate(sorted_auc, start=1):
-        lines.append(
-            f"| {rank} | {row['variant']} | {row['test_auc']:.6f} | {row['mcc']:.6f} | "
-            f"{row['test_auprc']:.6f} | {row['sensitivity']:.6f} | {row['specificity']:.6f} | "
-            f"{row['precision']:.6f} | {row['f1']:.6f} | {row['selected_threshold']:.2f} | {row['best_epoch']} |"
-        )
-    lines.extend([
-        "",
-        "## Sorted by Test MCC",
-        "",
-        "| Rank | Variant | Test MCC | Test AUC | AUPRC | Sens | Spec | Precision | F1 | Threshold | Best epoch |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ])
-    for rank, row in enumerate(sorted_mcc, start=1):
-        lines.append(
-            f"| {rank} | {row['variant']} | {row['mcc']:.6f} | {row['test_auc']:.6f} | "
-            f"{row['test_auprc']:.6f} | {row['sensitivity']:.6f} | {row['specificity']:.6f} | "
-            f"{row['precision']:.6f} | {row['f1']:.6f} | {row['selected_threshold']:.2f} | {row['best_epoch']} |"
-        )
-    lines.extend(["", "## Answers", ""])
-    lines.append(f"- Dual ESM-2 is best by test AUC: `{'yes' if dual_best_auc else 'no'}`; by test MCC: `{'yes' if dual_best_mcc else 'no'}`.")
-    if protein_contrib is not None and peptide_contrib is not None:
-        lines.append(
-            "- Protein ESM-2 contribution is larger than peptide ESM-2: "
-            f"`{'yes' if protein_bigger else 'no'}` "
-            f"(protein removal drop: AUC {protein_contrib[0]:+.6f}, MCC {protein_contrib[1]:+.6f}; "
-            f"peptide removal drop: AUC {peptide_contrib[0]:+.6f}, MCC {peptide_contrib[1]:+.6f})."
-        )
-    if largest is not None:
-        lines.append(f"- Largest performance drop vs full by test AUC: `{largest[0]}` (AUC drop {largest[1]:+.6f}, MCC drop {largest[2]:+.6f}).")
-    if (dual_best_auc and dual_best_mcc):
-        support_text = "`yes`."
-    elif dual_best_auc:
-        support_text = (
-            "`mostly yes`: full ESM-2 has the best test AUC, while the MCC leader should be noted separately."
-        )
-    else:
-        support_text = "`no/mixed`: full ESM-2 is not the top test-AUC setting in this seed."
-    lines.append("- These results support using ESM-2 + ESM-2 as final model input: " + support_text)
-    (run_dir / "ablation_pretrained_repr_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
 
 def run_variant(run_dir, variant, device, evaluate_test=True):
     start = time.time()
@@ -698,57 +549,3 @@ def run_variant(run_dir, variant, device, evaluate_test=True):
     gc.collect()
     torch.cuda.empty_cache()
     return result
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--variants", nargs="+", default=[variant["name"] for variant in VARIANTS], choices=[variant["name"] for variant in VARIANTS])
-    parser.add_argument("--run-dir", help="Existing output directory for resumed/partial ablation runs.")
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-    selected_names = set(args.variants)
-    selected_variants = [variant for variant in VARIANTS if variant["name"] in selected_names]
-    if args.run_dir:
-        run_dir = Path(args.run_dir).resolve()
-        run_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_dir = ROOT / "tuning_results" / f"bitenet_ablation_pretrained_repr_final_{timestamp}"
-        run_dir.mkdir(parents=True, exist_ok=False)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    atomic_json(
-        run_dir / "run_config.json",
-        {
-            "purpose": __doc__,
-            "created": datetime.now(timezone.utc).isoformat(),
-            "device": str(device),
-            "seed": SEED,
-            "epochs": EPOCHS,
-            "params": FINAL_PARAMS,
-            "model_config": BASE_MODEL_CONFIG,
-            "variants": selected_variants,
-        },
-    )
-    print(f"Run directory: {run_dir}", flush=True)
-    print(f"Device: {device}", flush=True)
-    results = []
-    for result_path in sorted(run_dir.glob("*/result.json")):
-        with result_path.open("r", encoding="utf-8") as handle:
-            results.append(json.load(handle))
-    completed = {item["variant"] for item in results}
-    for variant in selected_variants:
-        if variant["label"] in completed:
-            print(f"[{variant.get('log_label', variant['label'])}] already complete, skipping", flush=True)
-            continue
-        result = run_variant(run_dir, variant, device)
-        results.append(result)
-        write_summary(run_dir, results)
-    write_summary(run_dir, results)
-    print(f"Results: {run_dir}", flush=True)
-
-
-if __name__ == "__main__":
-    main()

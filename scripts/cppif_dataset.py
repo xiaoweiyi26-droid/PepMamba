@@ -39,6 +39,33 @@ class CPPIFProteinSiteDataset(Dataset):
                 'peptide':peptide_value,'labels':labels,'protein_length':len(protein),'peptide_length':len(peptide)}
 
 
+class CPPIF679ProteinSiteDataset(CPPIFProteinSiteDataset):
+    """CPPIF protocol retaining at most the first 679 protein residues."""
+
+    PROTEIN_LIMIT = 679
+    PEPTIDE_LIMIT = 50
+
+    def __getitem__(self, index):
+        item = super().__getitem__(index)
+        original_protein_length = item["protein_length"]
+        if item["peptide_length"] > self.PEPTIDE_LIMIT:
+            raise ValueError(
+                f"peptide exceeds {self.PEPTIDE_LIMIT}-residue CPPIF-679 protocol: "
+                f"{item['record_id']}"
+            )
+        retained_length = min(original_protein_length, self.PROTEIN_LIMIT)
+        item["protein"] = item["protein"][:retained_length]
+        item["labels"] = item["labels"][:retained_length]
+        item["protein_length"] = retained_length
+        item["original_protein_length"] = original_protein_length
+        item["protein_truncated"] = original_protein_length > retained_length
+        if item["protein"].shape != (retained_length, 1280):
+            raise ValueError(f"CPPIF-679 protein shape mismatch: {item['record_id']}")
+        if item["labels"].shape != (retained_length,):
+            raise ValueError(f"CPPIF-679 label shape mismatch: {item['record_id']}")
+        return item
+
+
 def cppif_collate(batch):
     proteins=[x['protein'] for x in batch]; peptides=[x['peptide'] for x in batch]; labels=[x['labels'] for x in batch]
     protein_pad=pad_sequence(proteins,batch_first=True,padding_value=0.0)
